@@ -1,0 +1,97 @@
+import asyncio
+import json
+import websockets
+from datetime import datetime, timezone
+from util import update_fair_value_for_market
+from trading import perform_trade
+
+import global_state
+
+RTDS_URL = "wss://ws-live-data.polymarket.com"
+
+# Build the subscription payload for BTC/USD from Chainlink
+SUBSCRIBE_MSG = {
+    "action": "subscribe",
+    "subscriptions": [
+        {
+            "topic": "crypto_prices_chainlink",
+            "type": "*",  # all message types for this topic
+            # NOTE: filters must be a JSON-encoded string per docs
+            "filters": "{\"symbol\":\"btc/usd\"}"
+        }
+    ],
+}
+
+
+async def ping_loop(ws, interval_sec: int = 5):
+    """
+    Send periodic PING messages to keep the RTDS connection alive.
+    Docs say you should send PING every ~5 seconds. :contentReference[oaicite:3]{index=3}
+    """
+    while True:
+        try:
+            await ws.send("PING")
+        except Exception as e:
+            print("Ping failed, stopping ping loop:", e)
+            return
+        await asyncio.sleep(interval_sec)
+
+
+async def stream_btc_usd():
+    async with websockets.connect(RTDS_URL, ping_interval=None) as ws:
+        # Subscribe to BTC/USD Chainlink crypto price stream
+        await ws.send(json.dumps(SUBSCRIBE_MSG))
+        print("Subscribed to crypto_prices_chainlink for btc/usd")
+
+        # Start background ping task
+        asyncio.create_task(ping_loop(ws))
+
+        # Listen for messages forever
+        while True:
+            msg = await ws.recv()
+
+            # RTDS messages are JSON
+            try:
+                data = json.loads(msg)
+                #print(data)
+                try:
+                    timestamp = data["payload"]["data"][0]["timestamp"]
+                    mid_price = data["payload"]["data"][0]["value"]
+                    global_state.mid_price = mid_price
+                    global_state.timestamp = timestamp
+
+                    # Update price blend Kalman filter with RTDS observation
+                    if hasattr(global_state, 'price_blend_filter') and global_state.price_blend_filter is not None:
+                        global_state.price_blend_filter.update_rtds(mid_price)
+                        global_state.blended_price = global_state.price_blend_filter.get_blended_price()
+
+                    for market_id in global_state.btc_markets:
+                        print("UPDATING FROM CHAINLINK")
+                        update_fair_value_for_market(market_id)
+                        asyncio.create_task(perform_trade(market_id))
+
+                except:
+                    timestamp = data["payload"]["timestamp"]
+                    mid_price = data["payload"]["value"]
+                    global_state.mid_price = mid_price
+                    global_state.timestamp = timestamp
+
+                    # Update price blend Kalman filter with RTDS observation
+                    if hasattr(global_state, 'price_blend_filter') and global_state.price_blend_filter is not None:
+                        global_state.price_blend_filter.update_rtds(mid_price)
+                        global_state.blended_price = global_state.price_blend_filter.get_blended_price()
+
+                    for market_id in global_state.btc_markets:
+                        #print("UPDATING FROM CHAINLINK")
+                        update_fair_value_for_market(market_id)
+            except json.JSONDecodeError:
+                # Might be "PONG" or some non-JSON message
+                print("Non-JSON message:", msg)
+                continue
+
+
+
+
+
+if __name__ == "__main__":
+    asyncio.run(stream_btc_usd())

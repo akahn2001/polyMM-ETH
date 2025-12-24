@@ -1,0 +1,39 @@
+# Environment and secrets
+.env
+.env.local
+.env.production
+credentials.json
+*_key*
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data files (optional - remove if you want to track these)
+markouts/
+*.csv
+
+# Logs
+*.log
+bot.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pytest
+.pytest_cache/

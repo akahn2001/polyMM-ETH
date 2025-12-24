@@ -1,0 +1,24 @@
+# Polymarket Trading Bot Dependencies
+
+# Core trading
+py-clob-client
+python-dotenv
+
+# Data & numerics
+pandas
+numpy
+scipy
+
+# Web & networking
+websockets
+requests
+
+# Data structures
+sortedcontainers
+
+# Timezone handling
+pytz
+
+# Optional: Analysis & visualization (not needed for live trading)
+# matplotlib
+# scikit-learn
