@@ -108,5 +108,114 @@ def analyze_theo_accuracy(csv_path="theo_comparison.csv", horizons=[1, 5, 15, 30
     return results_df
 
 
+def analyze_lead_lag(csv_path="theo_comparison.csv", max_lag=20):
+    """
+    Test if theos lead or lag the market.
+    Positive correlation at lag N means: theo change predicts market change N ticks later (theo LEADS)
+    Negative lag means: market moved first, theo followed (theo LAGS)
+    """
+    df = pd.read_csv(csv_path)
+    df = df.dropna(subset=['blended_theo', 'binance_theo', 'market_mid'])
+    df = df.reset_index(drop=True)
+
+    # Calculate changes
+    df['blended_chg'] = df['blended_theo'].diff()
+    df['binance_chg'] = df['binance_theo'].diff()
+    df['market_chg'] = df['market_mid'].diff()
+
+    df = df.dropna()
+
+    print("=" * 70)
+    print("LEAD/LAG ANALYSIS: Do theos predict market or follow it?")
+    print("=" * 70)
+    print()
+    print("Positive lag = theo change happens BEFORE market (theo leads)")
+    print("Negative lag = market changes BEFORE theo (theo lags)")
+    print()
+
+    # Test correlations at different lags
+    lags = range(-max_lag, max_lag + 1)
+
+    blended_corrs = []
+    binance_corrs = []
+
+    for lag in lags:
+        if lag == 0:
+            blended_corr = df['blended_chg'].corr(df['market_chg'])
+            binance_corr = df['binance_chg'].corr(df['market_chg'])
+        elif lag > 0:
+            # Theo change at t vs market change at t+lag (theo leads)
+            blended_corr = df['blended_chg'].iloc[:-lag].corr(df['market_chg'].iloc[lag:].reset_index(drop=True))
+            binance_corr = df['binance_chg'].iloc[:-lag].corr(df['market_chg'].iloc[lag:].reset_index(drop=True))
+        else:
+            # Market change at t vs theo change at t+|lag| (market leads)
+            abs_lag = abs(lag)
+            blended_corr = df['market_chg'].iloc[:-abs_lag].corr(df['blended_chg'].iloc[abs_lag:].reset_index(drop=True))
+            binance_corr = df['market_chg'].iloc[:-abs_lag].corr(df['binance_chg'].iloc[abs_lag:].reset_index(drop=True))
+
+        blended_corrs.append(blended_corr)
+        binance_corrs.append(binance_corr)
+
+    # Find peak correlations
+    blended_peak_idx = np.argmax(np.abs(blended_corrs))
+    binance_peak_idx = np.argmax(np.abs(binance_corrs))
+
+    blended_peak_lag = list(lags)[blended_peak_idx]
+    binance_peak_lag = list(lags)[binance_peak_idx]
+
+    print("BLENDED THEO:")
+    print(f"  Peak correlation: {blended_corrs[blended_peak_idx]:.4f} at lag {blended_peak_lag}")
+    if blended_peak_lag > 0:
+        print(f"  => Blended theo LEADS market by ~{blended_peak_lag} ticks")
+    elif blended_peak_lag < 0:
+        print(f"  => Blended theo LAGS market by ~{abs(blended_peak_lag)} ticks")
+    else:
+        print(f"  => Blended theo moves WITH market (no lead/lag)")
+    print()
+
+    print("BINANCE THEO:")
+    print(f"  Peak correlation: {binance_corrs[binance_peak_idx]:.4f} at lag {binance_peak_lag}")
+    if binance_peak_lag > 0:
+        print(f"  => Binance theo LEADS market by ~{binance_peak_lag} ticks")
+    elif binance_peak_lag < 0:
+        print(f"  => Binance theo LAGS market by ~{abs(binance_peak_lag)} ticks")
+    else:
+        print(f"  => Binance theo moves WITH market (no lead/lag)")
+    print()
+
+    # Show correlation at key lags
+    print("Correlation at key lags:")
+    print(f"  {'Lag':>5}  {'Blended':>10}  {'Binance':>10}  {'Interpretation'}")
+    print(f"  {'-'*5}  {'-'*10}  {'-'*10}  {'-'*30}")
+    for i, lag in enumerate(lags):
+        if lag in [-10, -5, -2, -1, 0, 1, 2, 5, 10]:
+            interp = ""
+            if lag < 0:
+                interp = f"market moved {abs(lag)} ticks ago"
+            elif lag > 0:
+                interp = f"market moves {lag} ticks later"
+            else:
+                interp = "simultaneous"
+            print(f"  {lag:>5}  {blended_corrs[i]:>10.4f}  {binance_corrs[i]:>10.4f}  {interp}")
+
+    print()
+    print("=" * 70)
+    print("INTERPRETATION:")
+    print("=" * 70)
+    print("If theo LEADS: your theo predicts where market will go - good for trading!")
+    print("If theo LAGS: you're reacting to market moves - bad, you'll get picked off")
+    print()
+
+    return pd.DataFrame({'lag': lags, 'blended_corr': blended_corrs, 'binance_corr': binance_corrs})
+
+
 if __name__ == "__main__":
+    print("\n" + "="*70)
+    print("PART 1: ACCURACY ANALYSIS")
+    print("="*70 + "\n")
     analyze_theo_accuracy()
+
+    print("\n" + "="*70)
+    print("PART 2: LEAD/LAG ANALYSIS")
+    print("="*70 + "\n")
+    analyze_lead_lag()
