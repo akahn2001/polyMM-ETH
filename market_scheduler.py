@@ -279,11 +279,11 @@ def configure_market(market: dict, strike: float):
 
 async def flatten_and_cancel(market_id: str):
     """
-    Cancel all orders and optionally flatten position before market ends.
+    Cancel all working orders before market ends.
     """
     from trading import cancel_many_orders
 
-    print(f"[SCHEDULER] Flattening market {market_id}")
+    print(f"[SCHEDULER] Cancelling orders for market {market_id}")
 
     # Cancel all orders for this market
     wo = global_state.working_orders_by_market.get(market_id, {})

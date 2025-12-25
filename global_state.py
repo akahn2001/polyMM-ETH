@@ -11,7 +11,7 @@ USER_OWNER_ID = "36e9b72d-fb6b-151f-0ad7-869f32584268"
 
 # Shadow trading flag
 trading_enabled = True
-dry_run = True  # Set to False to enable live trading
+dry_run = False  # Set to False to enable live trading
 
 # Bot start timestamp (for uptime tracking)
 bot_start_ts = None
