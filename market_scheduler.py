@@ -390,12 +390,18 @@ async def run_scheduler(csv_path: str, stop_before_end_seconds: int = 60, preloa
             await wait_until(market['start_time'])
         elif first_run:
             # Started mid-market - we don't know the true strike, skip to next
+            next_start = market['end_time']
             print(f"[SCHEDULER] Started mid-market ({market['question'][:50]}...)")
-            print(f"[SCHEDULER] Skipping - strike unknown. Waiting for next market...")
-            remaining = (market['end_time'] - now).total_seconds()
-            await asyncio.sleep(remaining + 5)
+            print(f"[SCHEDULER] Skipping - strike unknown. Next market starts at {next_start.strftime('%I:%M:%S %p ET')}")
+            # Wait until next market starts (which is when current market ends)
+            await wait_until(next_start)
             first_run = False
-            continue
+            # Now get the new market
+            now = datetime.now(ET)
+            market = get_next_market(markets, now)
+            if market is None:
+                continue
+            print(f"[SCHEDULER] Now trading: {market['question'][:50]}...")
 
         first_run = False
 
