@@ -212,7 +212,7 @@ async def reconcile_loop():
 # had .04 base width before, skew_k=1.0, min_order_interval=1.0, price_move_tol = .0035
 EDGE_TAKE_THRESHOLD = 0.50      # edge to justify crossing #.0275, was .04 12/19 night
 TAKER_SIZE_MULT = 1.0
-BASE_QUOTE_SPREAD = 0.065             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
+BASE_QUOTE_SPREAD = 0.050             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 10
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
@@ -222,9 +222,9 @@ SKEW_CAP = 0.04       # max skew in price points (5c)
 
 MIN_PRICE = 0.01
 MAX_PRICE = 0.99
-PRICE_MOVE_TOL = 0.0015          # don’t cancel/replace if existing quote is within 0.5c of target
+PRICE_MOVE_TOL = 0.0020          # don’t cancel/replace if existing quote is within 0.5c of target
 TICK_SIZE = .01
-MIN_TICKS_FROM_TOUCH = 0   # start with 2; try 1–3
+MIN_TICKS_FROM_TOUCH = 1   # start with 2; try 1–3
 
 MIN_ORDER_INTERVAL = 1.0  # seconds → max 5 orders/sec per market+side, # changed this back to 1
 
