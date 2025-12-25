@@ -38,10 +38,12 @@ async def ping_loop(ws, interval_sec: int = 5):
 
 
 async def stream_btc_usd():
-    print("[RTDS] Connecting to Chainlink price stream...")
+    print(f"[RTDS] Connecting to {RTDS_URL}...")
     while True:  # Reconnection loop
         try:
-            async with websockets.connect(RTDS_URL, ping_interval=None) as ws:
+            print("[RTDS] Attempting websocket connection...")
+            async with websockets.connect(RTDS_URL, ping_interval=None, open_timeout=10) as ws:
+                print("[RTDS] Websocket connected, sending subscription...")
                 # Subscribe to BTC/USD Chainlink crypto price stream
                 await ws.send(json.dumps(SUBSCRIBE_MSG))
                 print("[RTDS] Connected and subscribed to crypto_prices_chainlink for btc/usd")

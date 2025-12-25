@@ -303,27 +303,31 @@ async def flatten_and_cancel(market_id: str):
     print(f"[SCHEDULER] Cancelled {len(order_ids)} orders")
 
 
-async def run_scheduler(csv_path: str, stop_before_end_seconds: int = 60):
+async def run_scheduler(csv_path: str, stop_before_end_seconds: int = 60, preloaded_markets: list = None):
     """
     Main scheduler loop.
 
     Args:
         csv_path: Path to markets CSV
         stop_before_end_seconds: Stop trading this many seconds before market ends
+        preloaded_markets: Optional pre-loaded markets list to avoid re-parsing CSV
     """
     import traceback
 
     print(f"[SCHEDULER] Starting market scheduler")
-    print(f"[SCHEDULER] Loading markets from {csv_path}")
 
-    try:
-        markets = load_btc_15min_markets(csv_path)
-    except Exception as e:
-        print(f"[SCHEDULER] ERROR loading markets: {e}")
-        traceback.print_exc()
-        return
-
-    print(f"[SCHEDULER] Found {len(markets)} BTC 15-min markets")
+    if preloaded_markets is not None:
+        markets = preloaded_markets
+        print(f"[SCHEDULER] Using {len(markets)} pre-loaded markets")
+    else:
+        print(f"[SCHEDULER] Loading markets from {csv_path}")
+        try:
+            markets = load_btc_15min_markets(csv_path)
+        except Exception as e:
+            print(f"[SCHEDULER] ERROR loading markets: {e}")
+            traceback.print_exc()
+            return
+        print(f"[SCHEDULER] Found {len(markets)} BTC 15-min markets")
 
     if not markets:
         print(f"[SCHEDULER] ERROR: No markets found! Check CSV file and parsing.")

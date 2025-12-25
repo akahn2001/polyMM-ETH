@@ -327,7 +327,7 @@ async def main():
                 reconcile_loop_all(),
                 markout_loop(),
                 markout_dump_loop(),
-                run_scheduler(csv_path, stop_before_end_seconds=60)  # Auto-transition between markets
+                run_scheduler(csv_path, stop_before_end_seconds=60, preloaded_markets=all_markets)  # Auto-transition between markets
             )
             print("Reconnecting to the websocket")
         except:
