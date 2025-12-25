@@ -7,9 +7,77 @@ Analyzes detailed_fills.csv to diagnose trading performance and identify issues.
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from scipy import stats
 
 # Configuration
 MARKOUTS_FILE = "markouts/detailed_fills.csv"
+MIN_SAMPLES_FOR_SIGNIFICANCE = 10
+
+
+def significance_test(data, null_value=0, name="metric"):
+    """
+    Run a t-test to check if data is significantly different from null_value.
+    Returns (t_stat, p_value, is_significant, interpretation)
+    """
+    data = data.dropna()
+    n = len(data)
+
+    if n < MIN_SAMPLES_FOR_SIGNIFICANCE:
+        return None, None, False, f"⚠️  Too few samples (n={n}) for significance test"
+
+    t_stat, p_value = stats.ttest_1samp(data, null_value)
+    mean = data.mean()
+    std_err = data.std() / np.sqrt(n)
+    ci_95 = (mean - 1.96 * std_err, mean + 1.96 * std_err)
+
+    if p_value < 0.01:
+        sig = "***"  # p < 0.01
+        is_sig = True
+    elif p_value < 0.05:
+        sig = "**"   # p < 0.05
+        is_sig = True
+    elif p_value < 0.10:
+        sig = "*"    # p < 0.10
+        is_sig = False
+    else:
+        sig = ""
+        is_sig = False
+
+    direction = "positive" if mean > null_value else "negative"
+    interp = f"mean={mean:.5f} {sig} (p={p_value:.4f}, n={n}, 95%CI=[{ci_95[0]:.5f}, {ci_95[1]:.5f}])"
+
+    return t_stat, p_value, is_sig, interp
+
+
+def compare_groups(group1, group2, name1="Group1", name2="Group2"):
+    """
+    Run a t-test comparing two groups.
+    Returns interpretation string.
+    """
+    g1 = group1.dropna()
+    g2 = group2.dropna()
+
+    if len(g1) < MIN_SAMPLES_FOR_SIGNIFICANCE or len(g2) < MIN_SAMPLES_FOR_SIGNIFICANCE:
+        return f"⚠️  Too few samples ({name1}={len(g1)}, {name2}={len(g2)}) for comparison"
+
+    t_stat, p_value = stats.ttest_ind(g1, g2)
+    diff = g1.mean() - g2.mean()
+
+    if p_value < 0.01:
+        sig = "***"
+        verdict = "SIGNIFICANT difference"
+    elif p_value < 0.05:
+        sig = "**"
+        verdict = "SIGNIFICANT difference"
+    elif p_value < 0.10:
+        sig = "*"
+        verdict = "marginally significant"
+    else:
+        sig = ""
+        verdict = "NOT significant"
+
+    return f"Δ={diff:+.5f} {sig} (p={p_value:.4f}) - {verdict}"
+
 
 def load_data():
     """Load markouts data."""
@@ -68,7 +136,9 @@ def overall_performance(df):
     print(f"Buy fills: {(df['dir_yes'] == 1).sum()}")
     print(f"Sell fills: {(df['dir_yes'] == -1).sum()}")
 
-    print(f"\nMarkout Performance:")
+    print(f"\nMarkout Performance (with significance tests):")
+    print(f"  Legend: *** p<0.01, ** p<0.05, * p<0.10")
+    print()
     for horizon in [1, 5, 15, 30, 60]:
         col = f'markout_{horizon}s'
         if col in df.columns:
@@ -76,7 +146,9 @@ def overall_performance(df):
             median = df[col].median()
             hit_rate = (df[col] > 0).sum() / len(df) * 100
             total = df[col].sum()
-            print(f"  {horizon}s: avg=${avg:.4f}, median=${median:.4f}, hit={hit_rate:.1f}%, total=${total:.2f}")
+            _, p_val, is_sig, interp = significance_test(df[col], null_value=0)
+            print(f"  {horizon}s: {interp}")
+            print(f"       median=${median:.4f}, hit={hit_rate:.1f}%, total=${total:.2f}")
 
     print(f"\nDelta Check:")
     print(f"  Avg delta: {df['delta'].mean():.6f}")
@@ -108,8 +180,16 @@ def momentum_analysis(df):
     flat = df[abs(df['binance_momentum']) <= 10]
 
     print(f"  Rising (>$10):   {len(rising):3d} fills, avg markout=${rising['markout_5s'].mean():.4f}")
+    _, _, _, rising_sig = significance_test(rising['markout_5s']) if len(rising) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
+    if rising_sig: print(f"                   {rising_sig}")
+
     print(f"  Falling (<-$10): {len(falling):3d} fills, avg markout=${falling['markout_5s'].mean():.4f}")
+    _, _, _, falling_sig = significance_test(falling['markout_5s']) if len(falling) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
+    if falling_sig: print(f"                   {falling_sig}")
+
     print(f"  Flat (±$10):     {len(flat):3d} fills, avg markout=${flat['markout_5s'].mean():.4f}")
+    _, _, _, flat_sig = significance_test(flat['markout_5s']) if len(flat) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
+    if flat_sig: print(f"                   {flat_sig}")
 
     # Should momentum fills have better markouts?
     momentum_fills = df[abs(df['binance_momentum']) > 10]
@@ -117,6 +197,10 @@ def momentum_analysis(df):
 
     print(f"\n  Momentum fills (|mom|>$10): avg markout=${momentum_fills['markout_5s'].mean():.4f}")
     print(f"  Flat fills (|mom|≤$10):     avg markout=${flat_fills['markout_5s'].mean():.4f}")
+
+    # Statistical comparison
+    comparison = compare_groups(momentum_fills['markout_5s'], flat_fills['markout_5s'], "Momentum", "Flat")
+    print(f"  Comparison: {comparison}")
 
     if momentum_fills['markout_5s'].mean() > flat_fills['markout_5s'].mean():
         print("  ✅ Momentum fills are more profitable!")
@@ -234,10 +318,19 @@ def directional_bias(df):
     sells = df[df['dir_yes'] == -1]
 
     print(f"Buy performance:  {len(buys)} fills, avg markout=${buys['markout_5s'].mean():.4f}")
+    _, _, _, buy_sig = significance_test(buys['markout_5s']) if len(buys) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
+    if buy_sig: print(f"                  {buy_sig}")
+
     print(f"Sell performance: {len(sells)} fills, avg markout=${sells['markout_5s'].mean():.4f}")
+    _, _, _, sell_sig = significance_test(sells['markout_5s']) if len(sells) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
+    if sell_sig: print(f"                  {sell_sig}")
+
+    # Statistical comparison
+    comparison = compare_groups(buys['markout_5s'], sells['markout_5s'], "Buys", "Sells")
+    print(f"\nBuy vs Sell comparison: {comparison}")
 
     if abs(buys['markout_5s'].mean() - sells['markout_5s'].mean()) > 0.005:
-        print(f"  ⚠️  Significant bias - one side is much worse!")
+        print(f"  ⚠️  Large difference - one side is much worse!")
     else:
         print(f"  ✅ Balanced performance on both sides")
 
@@ -360,13 +453,16 @@ def maker_vs_taker_analysis(df):
     print(f"  Maker (GTC): {len(gtc)} fills ({len(gtc)/len(df)*100:.1f}%)")
     print(f"  Taker (IOC): {len(ioc)} fills ({len(ioc)/len(df)*100:.1f}%)")
 
-    print(f"\nMarkout performance:")
+    print(f"\nMarkout performance (with significance tests):")
     for horizon in [1, 5, 15, 30, 60]:
         col = f'markout_{horizon}s'
         if col in df.columns:
             gtc_avg = gtc[col].mean() if len(gtc) > 0 else 0
             ioc_avg = ioc[col].mean() if len(ioc) > 0 else 0
+            comparison = compare_groups(gtc[col], ioc[col], "Maker", "Taker") if len(gtc) > 0 and len(ioc) > 0 else ""
             print(f"  {horizon}s: Maker=${gtc_avg:.4f}, Taker=${ioc_avg:.4f}")
+            if comparison:
+                print(f"       {comparison}")
 
     if len(gtc) > 0 and len(ioc) > 0:
         gtc_total = gtc['markout_5s'].sum()
@@ -485,6 +581,26 @@ def main():
     summary_and_diagnosis(df)
 
     print("\n" + "=" * 80)
+    print("STATISTICAL SIGNIFICANCE GUIDE")
+    print("=" * 80)
+    print("""
+  *** = p < 0.01 (99% confident result is real, not noise)
+  **  = p < 0.05 (95% confident result is real)
+  *   = p < 0.10 (90% confident - marginally significant)
+  (no stars) = NOT statistically significant - could be random noise!
+
+  95% CI = Confidence interval. True value likely falls within this range.
+
+  Sample size matters:
+    n < 30:  Results are unreliable, need more data
+    n = 30-100: Moderate confidence
+    n > 100: Good statistical power
+
+  If your key metrics are NOT significant (no stars):
+    → Collect more data before making decisions
+    → The observed effect might just be noise
+    """)
+    print("=" * 80)
     print("Analysis complete!")
     print("=" * 80)
 
