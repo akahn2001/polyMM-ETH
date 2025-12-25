@@ -213,7 +213,7 @@ def get_all_markets(client):
 
 
 
-pclient = PolymarketClient()
+#pclient = PolymarketClient()
 #print(pclient.get_open_orders_all())
 
 # TODO: TEST THE OPEN ORDERS CANCEL LOGIC
@@ -225,8 +225,8 @@ pclient = PolymarketClient()
 #pclient.cancel_orders([order_id])
 
 df = get_all_markets(pclient.client)
-df.to_csv("all_markets_df_12_25.csv")
-exit()
+#df.to_csv("all_markets_df_12_25.csv")
+#exit()
 #filtered_df = df[df['tags'].apply(lambda x: x is not None and "Crypto" in x and "Up or Down" in x)]
 #filtered_df = filtered_df[filtered_df["accepting_orders"] == "TRUE"]
 #print(filtered_df)
