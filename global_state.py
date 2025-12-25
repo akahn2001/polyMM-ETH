@@ -11,7 +11,10 @@ USER_OWNER_ID = "36e9b72d-fb6b-151f-0ad7-869f32584268"
 
 # Shadow trading flag
 trading_enabled = True
-dry_run = False
+dry_run = True  # Set to False to enable live trading
+
+# Bot start timestamp (for uptime tracking)
+bot_start_ts = None
 
 @dataclass
 class MarketPosition:
@@ -33,8 +36,14 @@ last_order_time: dict[tuple[str, str], float] = {}
 
 # ============ Market Data ============
 
-# List of all tokens being tracked
+# List of all tokens being tracked (current active market)
 all_tokens = []
+
+# All tokens to subscribe to (all upcoming markets)
+all_subscription_tokens = []
+
+# Currently active market ID for trading
+active_market_id = None
 
 # Mapping between tokens in the same market (YES->NO, NO->YES)
 REVERSE_TOKENS = {} # maps YES to NO

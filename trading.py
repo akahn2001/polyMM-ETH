@@ -149,6 +149,15 @@ async def reconcile_loop_all():
                     print(f"[RECONCILE_ALL] open={len(open_ids)} protected={len(protected)} cancelling={len(cancel_ids)}")
                 await cancel_many_orders(cancel_ids)
 
+        except PolyApiException as e:
+            if e.status_code == 401:
+                print(f"[RECONCILE_ALL] 401 Unauthorized - refreshing credentials...")
+                try:
+                    global_state.client.refresh_creds()
+                except Exception as refresh_err:
+                    print(f"[RECONCILE_ALL] Failed to refresh creds: {refresh_err}")
+            else:
+                print(f"[RECONCILE_ALL] API error: {e}")
         except Exception as e:
             print(f"[RECONCILE_ALL] error: {e}")
 
@@ -202,6 +211,15 @@ async def reconcile_loop():
             market_ids = list(wom.keys()) if isinstance(wom, dict) else []
             for mkt in market_ids:
                 await reconcile_market_orders(mkt)
+        except PolyApiException as e:
+            if e.status_code == 401:
+                print(f"[RECONCILE_LOOP] 401 Unauthorized - refreshing credentials...")
+                try:
+                    global_state.client.refresh_creds()
+                except Exception as refresh_err:
+                    print(f"[RECONCILE_LOOP] Failed to refresh creds: {refresh_err}")
+            else:
+                print(f"[RECONCILE_LOOP] API error: {e}")
         except Exception as e:
             print(f"[RECONCILE_LOOP] unexpected error: {e}")
 
@@ -365,6 +383,14 @@ async def send_order(token_id: str, side: str, price: float, size: float, tif: s
         #print(f"[SEND_ORDER] Placed {tif} {side} {size} @ {price:.4f} on token {token_id} (market={market_id}) -> {order_id}")
         return order_id
 
+    except PolyApiException as e:
+        if e.status_code == 401:
+            print(f"[SEND_ORDER] 401 Unauthorized - refreshing credentials...")
+            try:
+                global_state.client.refresh_creds()
+            except Exception as refresh_err:
+                print(f"[SEND_ORDER] Failed to refresh creds: {refresh_err}")
+        return None
     except Exception as e:
         #print(f"[SEND_ORDER][ERROR] Unexpected exception: {e}")
         return None

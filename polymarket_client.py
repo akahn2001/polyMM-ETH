@@ -49,6 +49,12 @@ class PolymarketClient():
         self.creds = self.client.create_or_derive_api_creds()
         self.client.set_api_creds(creds=self.creds)
 
+    def refresh_creds(self):
+        """Re-derive API credentials when they expire (401 error)."""
+        print("[AUTH] Refreshing API credentials...")
+        self.creds = self.client.create_or_derive_api_creds()
+        self.client.set_api_creds(creds=self.creds)
+        print("[AUTH] Credentials refreshed successfully")
 
     def get_usdc_balance(self):
         params=BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)

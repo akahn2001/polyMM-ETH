@@ -20,6 +20,7 @@ from kalman_filter import VolKalman1D
 from price_blend_kalman import PriceBlendKalman
 from trading import sweep_zombie_orders_from_working, reconcile_loop, reconcile_loop_all
 from markouts import markout_loop, markout_dump_loop
+from market_scheduler import load_btc_15min_markets, run_scheduler
 
 def update_once(client):
     # TODO: too much looping here is wasting time
@@ -235,11 +236,34 @@ async def main():
     client = PolymarketClient()
     global_state.client = client
 
-    # Initialize state and fetch initial data
-    global_state.all_tokens = ["99850318462148649341412129886288529687592003270430754357769829623130877894962"]
-    global_state.btc_markets.add(global_state.all_tokens[0])
+    # Load all BTC 15-min markets from CSV
+    csv_path = "all_markets_df_12_25.csv"
+    all_markets = load_btc_15min_markets(csv_path)
+    print(f"[MAIN] Loaded {len(all_markets)} BTC 15-min markets from {csv_path}")
 
-    update_once(global_state.client)
+    # Extract all token IDs for websocket subscription (subscribe to all upcoming markets)
+    all_token_ids = []
+    for m in all_markets:
+        all_token_ids.append(m['yes_token'])
+        # Also register token mappings upfront
+        global_state.condition_to_token_id[m['condition_id']] = m['yes_token']
+        global_state.token_to_condition_id[m['yes_token']] = m['condition_id']
+        global_state.token_to_condition_id[m['no_token']] = m['condition_id']
+        global_state.REVERSE_TOKENS[m['yes_token']] = m['no_token']
+        global_state.REVERSE_TOKENS[m['no_token']] = m['yes_token']
+
+    # Initialize with first market's token (scheduler will update this)
+    if all_markets:
+        global_state.all_tokens = [all_markets[0]['yes_token']]
+        # btc_markets should contain condition_ids (not token_ids) for fair value updates
+        global_state.btc_markets.add(all_markets[0]['condition_id'])
+    else:
+        print("[MAIN] WARNING: No BTC 15-min markets found!")
+        global_state.all_tokens = []
+
+    # Store all token IDs for websocket subscription
+    global_state.all_subscription_tokens = all_token_ids
+    print(f"[MAIN] Will subscribe to {len(all_token_ids)} market tokens")
 
     # Initialize price blend Kalman filter with current market price
     print("[INIT] Querying Binance and Kraken APIs for initial price...")
@@ -296,13 +320,14 @@ async def main():
              #   connect_user_websocket()
             #)
             await asyncio.gather(
-                connect_market_websocket(global_state.all_tokens),
+                connect_market_websocket(global_state.all_subscription_tokens),  # Subscribe to all markets
                 stream_btc_usd(),
                 stream_binance_btcusdt_mid(verbose=False),  # Stream Binance prices and auto-update Binance theos
                 connect_user_websocket(client.creds.api_key, client.creds.api_secret, client.creds.api_passphrase),
                 reconcile_loop_all(),
                 markout_loop(),
-                markout_dump_loop()
+                markout_dump_loop(),
+                run_scheduler(csv_path, stop_before_end_seconds=60)  # Auto-transition between markets
             )
             print("Reconnecting to the websocket")
         except:
