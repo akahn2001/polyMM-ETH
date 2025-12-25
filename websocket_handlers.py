@@ -4,9 +4,7 @@ import websockets  # WebSocket client
 import traceback  # Exception handling
 from process_data import process_data, process_book_data, process_user_data, process_price_change
 import time
-
-#from poly_data.data_processing import process_data, process_user_data
-#import poly_data.global_state as global_state
+import global_state
 
 #chunk = ["106393185783537449644078805690800189614172565600484574723938260022241088055271"]
 
@@ -20,42 +18,57 @@ async def connect_market_websocket(chunk):
     1. Establishes a WebSocket connection to the Polymarket API
     2. Subscribes to updates for a specified list of market tokens
     3. Processes incoming order book and price updates
+    4. Reconnects with updated token list if signaled by scheduler
 
     Args:
-        chunk (list): List of token IDs to subscribe to
+        chunk (list): List of token IDs to subscribe to (initial list, will use
+                      global_state.all_subscription_tokens on reconnect)
 
     Notes:
-        If the connection is lost, the function will exit and the main loop will
-        attempt to reconnect after a short delay.
+        If the connection is lost or reconnect is signaled, the function will exit
+        and the main loop will attempt to reconnect after a short delay.
     """
-    uri = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
-    async with websockets.connect(uri, ping_interval=5, ping_timeout=None) as websocket:
-        # Prepare and send subscription message
-        message = {"assets_ids": chunk}
-        await websocket.send(json.dumps(message))
+    while True:
+        # Use latest tokens from global_state (updated by scheduler on CSV reload)
+        tokens_to_subscribe = global_state.all_subscription_tokens if global_state.all_subscription_tokens else chunk
+        global_state.websocket_reconnect_needed = False  # Clear flag before connecting
 
-        print("\n")
-        print(f"Sent market subscription message: {message}")
-
+        uri = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
         try:
-            # Process incoming market data indefinitely
-            while True:
-                message = await websocket.recv()
-                json_data = json.loads(message)
-                if type(json_data) != list:
-                    json_data = [json_data]
-                #print(json_data)
-                # Process order book updates and trigger trading as needed
-                process_data(json_data)
+            async with websockets.connect(uri, ping_interval=5, ping_timeout=None) as websocket:
+                # Prepare and send subscription message
+                message = {"assets_ids": tokens_to_subscribe}
+                await websocket.send(json.dumps(message))
+
+                print("\n")
+                print(f"[WS] Subscribed to {len(tokens_to_subscribe)} market tokens")
+
+                # Process incoming market data
+                while True:
+                    # Check if reconnect is needed (new tokens added)
+                    if global_state.websocket_reconnect_needed:
+                        print("[WS] Reconnect signal received, reconnecting with updated tokens...")
+                        break  # Exit inner loop to reconnect
+
+                    try:
+                        # Use timeout so we can check reconnect flag periodically
+                        message = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                        json_data = json.loads(message)
+                        if type(json_data) != list:
+                            json_data = [json_data]
+                        process_data(json_data)
+                    except asyncio.TimeoutError:
+                        continue  # No message, loop back to check reconnect flag
+
         except websockets.ConnectionClosed:
-            print("Connection closed in market websocket")
+            print("[WS] Connection closed in market websocket")
             print(traceback.format_exc())
         except Exception as e:
-            print(f"Exception in market websocket: {e}")
+            print(f"[WS] Exception in market websocket: {e}")
             print(traceback.format_exc())
-        finally:
-            # Brief delay before attempting to reconnect
-            await asyncio.sleep(5)
+
+        # Brief delay before attempting to reconnect
+        await asyncio.sleep(5)
 
 #asyncio.run(connect_market_websocket(chunk))
 

@@ -114,15 +114,15 @@ def load_btc_15min_markets(csv_path: str) -> list[dict]:
     """
     df = pd.read_csv(csv_path)
 
-    # Filter to Bitcoin 15-min markets (have PM-PM pattern in name)
-    btc_15min = df[
+    # Filter to Bitcoin up/down markets (have time pattern in name)
+    btc_markets = df[
         df['question'].str.contains('Bitcoin Up or Down', na=False) &
         df['question'].str.contains(r'\d+:\d+[AP]M-\d+:\d+[AP]M', na=False, regex=True)
     ].copy()
 
     markets = []
 
-    for _, row in btc_15min.iterrows():
+    for _, row in btc_markets.iterrows():
         question = row['question']
         times = parse_market_time(question)
 
@@ -130,6 +130,11 @@ def load_btc_15min_markets(csv_path: str) -> list[dict]:
             continue
 
         start_dt, end_dt = times
+
+        # Filter to only 15-minute markets (duration between 14-16 minutes to allow for slight variations)
+        duration_minutes = (end_dt - start_dt).total_seconds() / 60
+        if duration_minutes < 14 or duration_minutes > 16:
+            continue
 
         tokens = parse_tokens(str(row.get('tokens', '')))
         if tokens is None:
@@ -292,31 +297,78 @@ async def run_scheduler(csv_path: str, stop_before_end_seconds: int = 60):
         csv_path: Path to markets CSV
         stop_before_end_seconds: Stop trading this many seconds before market ends
     """
+    import traceback
+
     print(f"[SCHEDULER] Starting market scheduler")
     print(f"[SCHEDULER] Loading markets from {csv_path}")
 
-    markets = load_btc_15min_markets(csv_path)
+    try:
+        markets = load_btc_15min_markets(csv_path)
+    except Exception as e:
+        print(f"[SCHEDULER] ERROR loading markets: {e}")
+        traceback.print_exc()
+        return
+
     print(f"[SCHEDULER] Found {len(markets)} BTC 15-min markets")
 
+    if not markets:
+        print(f"[SCHEDULER] ERROR: No markets found! Check CSV file and parsing.")
+        return
+
     # Show upcoming markets
+    now = datetime.now(ET)
+    print(f"[SCHEDULER] Current time: {now.strftime('%Y-%m-%d %I:%M:%S %p ET')}")
+
     upcoming = get_markets_for_next_hours(markets, hours=2)
     print(f"[SCHEDULER] Next {len(upcoming)} markets in the next 2 hours:")
     for m in upcoming[:5]:
         print(f"  - {m['start_time'].strftime('%I:%M %p')} - {m['end_time'].strftime('%I:%M %p')}: {m['question'][:50]}...")
 
+    if not upcoming:
+        print(f"[SCHEDULER] WARNING: No markets in next 2 hours. Showing next 5 markets regardless of time:")
+        for m in markets[:5]:
+            print(f"  - {m['start_time'].strftime('%Y-%m-%d %I:%M %p')} - {m['end_time'].strftime('%I:%M %p')}: {m['question'][:50]}...")
+
     first_run = True
     while True:
         now = datetime.now(ET)
+        print(f"[SCHEDULER] Looking for next market at {now.strftime('%I:%M:%S %p ET')}")
         market = get_next_market(markets, now)
 
         if market is None:
+            print(f"[SCHEDULER] get_next_market returned None")
             print(f"[SCHEDULER] No more markets today. Reloading CSV in 1 hour...")
             await asyncio.sleep(3600)
             markets = load_btc_15min_markets(csv_path)
+
+            # Update subscription tokens with any new markets
+            old_tokens = set(global_state.all_subscription_tokens)
+            new_tokens = [m['yes_token'] for m in markets]
+            global_state.all_subscription_tokens = new_tokens
+
+            # Register new token mappings
+            for m in markets:
+                global_state.condition_to_token_id[m['condition_id']] = m['yes_token']
+                global_state.token_to_condition_id[m['yes_token']] = m['condition_id']
+                global_state.token_to_condition_id[m['no_token']] = m['condition_id']
+                global_state.REVERSE_TOKENS[m['yes_token']] = m['no_token']
+                global_state.REVERSE_TOKENS[m['no_token']] = m['yes_token']
+
+            # Check if we have new tokens that need subscription
+            new_token_set = set(new_tokens)
+            if new_token_set - old_tokens:
+                print(f"[SCHEDULER] Found {len(new_token_set - old_tokens)} new tokens, signaling websocket reconnect")
+                global_state.websocket_reconnect_needed = True
+
+            print(f"[SCHEDULER] Reloaded {len(markets)} markets")
             continue
+
+        print(f"[SCHEDULER] Found market: {market['question'][:50]}...")
+        print(f"[SCHEDULER] Market starts at {market['start_time'].strftime('%I:%M:%S %p ET')}, ends at {market['end_time'].strftime('%I:%M:%S %p ET')}")
 
         # Wait for market start if not yet started
         if now < market['start_time']:
+            print(f"[SCHEDULER] Market hasn't started yet, waiting...")
             await wait_until(market['start_time'])
         elif first_run:
             # Started mid-market - we don't know the true strike, skip to next

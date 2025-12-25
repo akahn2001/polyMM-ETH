@@ -45,6 +45,9 @@ all_subscription_tokens = []
 # Currently active market ID for trading
 active_market_id = None
 
+# Flag to signal websocket should reconnect (e.g., after CSV reload with new tokens)
+websocket_reconnect_needed = False
+
 # Mapping between tokens in the same market (YES->NO, NO->YES)
 REVERSE_TOKENS = {} # maps YES to NO
 
