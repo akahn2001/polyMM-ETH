@@ -112,17 +112,25 @@ def load_btc_15min_markets(csv_path: str) -> list[dict]:
     Load all BTC 15-minute up/down markets from CSV.
     Returns list of market dicts sorted by start time.
     """
+    print(f"[SCHEDULER] Reading CSV file...")
     df = pd.read_csv(csv_path)
+    print(f"[SCHEDULER] CSV loaded, {len(df)} total rows")
 
     # Filter to Bitcoin up/down markets (have time pattern in name)
+    print(f"[SCHEDULER] Filtering to BTC up/down markets...")
     btc_markets = df[
         df['question'].str.contains('Bitcoin Up or Down', na=False) &
         df['question'].str.contains(r'\d+:\d+[AP]M-\d+:\d+[AP]M', na=False, regex=True)
     ].copy()
+    print(f"[SCHEDULER] Found {len(btc_markets)} BTC markets with time patterns")
 
     markets = []
+    print(f"[SCHEDULER] Parsing {len(btc_markets)} markets...")
 
-    for _, row in btc_markets.iterrows():
+    for idx, (_, row) in enumerate(btc_markets.iterrows()):
+        if idx % 1000 == 0:
+            print(f"[SCHEDULER] Parsed {idx}/{len(btc_markets)} markets...")
+
         question = row['question']
         times = parse_market_time(question)
 
@@ -151,6 +159,7 @@ def load_btc_15min_markets(csv_path: str) -> list[dict]:
             'end_time': end_dt,
         })
 
+    print(f"[SCHEDULER] Parsing complete. Found {len(markets)} 15-min markets")
     # Sort by start time
     markets.sort(key=lambda m: m['start_time'])
 
@@ -199,23 +208,28 @@ async def wait_until(target_time: datetime):
 async def capture_strike_from_rtds() -> float:
     """
     Capture current RTDS price as the strike.
-    Waits briefly if RTDS not yet available.
+    Waits for RTDS to be connected (up to 30 seconds).
     """
+    # Wait for RTDS to be connected (up to 30 seconds)
+    for i in range(60):
+        if global_state.rtds_connected:
+            break
+        if i % 10 == 0:
+            print(f"[SCHEDULER] Waiting for RTDS connection... ({i}/60)")
+        await asyncio.sleep(0.5)
+
+    if not global_state.rtds_connected:
+        raise RuntimeError("RTDS not connected after 30 seconds - cannot capture strike")
+
+    # Now get the RTDS price
     for _ in range(10):  # Try for up to 5 seconds
-        # mid_price is the RTDS price from Chainlink stream
         rtds_price = getattr(global_state, 'mid_price', None)
         if rtds_price is not None and rtds_price > 0:
             print(f"[SCHEDULER] Captured strike from RTDS: ${rtds_price:.2f}")
             return rtds_price
         await asyncio.sleep(0.5)
 
-    # Fallback to blended price
-    blended = getattr(global_state, 'blended_price', None)
-    if blended is not None and blended > 0:
-        print(f"[SCHEDULER] WARNING: Using blended price as strike fallback: ${blended:.2f}")
-        return blended
-
-    raise RuntimeError("Could not capture strike - no RTDS or blended price available")
+    raise RuntimeError("RTDS connected but no price available")
 
 
 def configure_market(market: dict, strike: float):
