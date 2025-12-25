@@ -27,11 +27,14 @@ def process_book_data(asset, json_data):
 
 def process_price_change(asset, side, price_level, new_size, asset_id):
     # Fires when there is a change to the order book, ie order is modified or cancelled
-    # TODO: THIS FUNCTION SCREWS THINGS UP SOMEHOW, what does this even do in the API?
-    #print(asset) # asset in this case is the market id
-    #print("PROCESSING PRICE CHG")
-    if asset_id != global_state.condition_to_token_id[asset]: # so in all_data global dict asset should map to the yes token?
+    # Skip if we haven't received the initial book snapshot yet
+    if asset not in global_state.all_data:
+        return
+    if asset not in global_state.condition_to_token_id:
+        return
+    if asset_id != global_state.condition_to_token_id[asset]:
         return  # skip updates for the No token to prevent duplicated updates
+
     if side == 'bids':
         book = global_state.all_data[asset]['bids']
     else:
