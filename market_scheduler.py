@@ -439,11 +439,11 @@ async def run_scheduler(csv_path: str, stop_before_end_seconds: int = 60, preloa
 
         await flatten_and_cancel(market['condition_id'])
 
-        # Wait for market to actually end
+        # Wait for market to actually end (next market starts at same time)
         remaining = (market['end_time'] - datetime.now(ET)).total_seconds()
         if remaining > 0:
             print(f"[SCHEDULER] Waiting {remaining:.0f}s for market to end...")
-            await asyncio.sleep(remaining + 5)  # Add 5s buffer
+            await asyncio.sleep(remaining)  # No buffer - next market starts immediately
 
         print(f"[SCHEDULER] Market ended. Moving to next market...")
 
