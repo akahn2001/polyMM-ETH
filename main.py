@@ -23,7 +23,7 @@ from markouts import markout_loop, markout_dump_loop
 
 def update_once(client):
     # TODO: too much looping here is wasting time
-    all_markets = pd.read_csv("all_markets_df_12_22.csv")
+    all_markets = pd.read_csv("all_markets_df_12_25.csv")
     for row in all_markets.iterrows():
         row=row[1]
         tokens = row["tokens"]
@@ -236,7 +236,7 @@ async def main():
     global_state.client = client
 
     # Initialize state and fetch initial data
-    global_state.all_tokens = ["57569674100245730700470715068168309612872984563688729302336922417552475142781"]
+    global_state.all_tokens = ["67794549004814878772711528212389736566913841827624870032470687219519186951957"]
     global_state.btc_markets.add(global_state.all_tokens[0])
 
     update_once(global_state.client)

@@ -46,8 +46,8 @@ token_to_condition_id = {}
 open_orders = {}
 
 net_position = 0
-strike = 88164
-exp = datetime(2025, 12, 22, 22, 45, tzinfo=ZoneInfo("America/New_York"))
+strike = 87520
+exp = datetime(2025, 12, 25, 9, 45, tzinfo=ZoneInfo("America/New_York"))
 
 client = None
 
