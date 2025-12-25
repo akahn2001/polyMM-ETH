@@ -236,7 +236,7 @@ async def main():
     global_state.client = client
 
     # Initialize state and fetch initial data
-    global_state.all_tokens = ["64273508464976350498116146634251983684601300481505945022757773313803954363514"]
+    global_state.all_tokens = ["54222753867551758322080730131561292976117349450671158361083650922163812471285"]
     global_state.btc_markets.add(global_state.all_tokens[0])
 
     update_once(global_state.client)
