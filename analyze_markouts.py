@@ -435,6 +435,111 @@ def book_imbalance_analysis(df):
     print(f"  Std imbalance:  {df_imb['book_imbalance'].std():.3f}")
     print(f"  Min/Max:        {df_imb['book_imbalance'].min():.3f} / {df_imb['book_imbalance'].max():.3f}")
 
+def realized_vol_theo_analysis(df):
+    """Test if realized vol theo has predictive power vs implied vol theo."""
+    print("\n" + "=" * 80)
+    print("REALIZED VOL THEO ANALYSIS")
+    print("=" * 80)
+
+    if 'realized_vol_theo' not in df.columns:
+        print("  ⚠️  realized_vol_theo not in data - run with updated code")
+        print("     Delete detailed_fills.csv and restart bot to get this data")
+        return
+
+    # Filter out NaN values
+    df_vol = df[df['realized_vol_theo'].notna() & df['theo'].notna()].copy()
+    if len(df_vol) == 0:
+        print("  ⚠️  No realized vol theo data available (cold start period)")
+        return
+
+    print(f"Fills with vol data: {len(df_vol)} / {len(df)}")
+
+    # Calculate edge vs realized vol theo
+    # For buys (dir_yes=+1): positive edge = bought below realized vol theo
+    # For sells (dir_yes=-1): positive edge = sold above realized vol theo
+    df_vol['edge_vs_realized_theo'] = np.where(
+        df_vol['dir_yes'] == 1,
+        df_vol['realized_vol_theo'] - df_vol['fill_yes'],
+        df_vol['fill_yes'] - df_vol['realized_vol_theo']
+    )
+
+    # Compare correlations: which theo predicts markouts better?
+    print(f"\nWhich theo predicts markouts better?")
+
+    implied_corr = df_vol['edge_vs_theo'].corr(df_vol['markout_5s'])
+    realized_corr = df_vol['edge_vs_realized_theo'].corr(df_vol['markout_5s'])
+
+    print(f"  Edge vs Implied Theo → Markout correlation:  {implied_corr:.4f}")
+    print(f"  Edge vs Realized Theo → Markout correlation: {realized_corr:.4f}")
+
+    if realized_corr > implied_corr + 0.05:
+        print(f"  ✅ REALIZED VOL THEO is MORE predictive!")
+        print(f"     → Consider using realized vol for pricing")
+    elif implied_corr > realized_corr + 0.05:
+        print(f"  ✅ IMPLIED VOL THEO is MORE predictive")
+        print(f"     → Current approach is correct")
+    else:
+        print(f"  ⚠️  Similar predictive power - no clear winner")
+
+    # Compare theos directly
+    print(f"\nTheo comparison:")
+    theo_diff = (df_vol['realized_vol_theo'] - df_vol['theo']).mean()
+    print(f"  Avg (realized_vol_theo - theo): {theo_diff:.4f}")
+    print(f"  Realized vol theo tends to be {'HIGHER' if theo_diff > 0 else 'LOWER'} than implied vol theo")
+
+    # Vol edge analysis: when realized > implied, did we make money?
+    print(f"\nVol edge analysis:")
+    if 'vol_edge_15m' in df_vol.columns:
+        df_edge = df_vol[df_vol['vol_edge_15m'].notna()]
+
+        high_realized = df_edge[df_edge['vol_edge_15m'] > 0.05]  # realized > implied by 5%
+        low_realized = df_edge[df_edge['vol_edge_15m'] < -0.05]  # implied > realized by 5%
+
+        print(f"  High realized vol (vol_edge > 5%): {len(high_realized)} fills, avg markout=${high_realized['markout_5s'].mean():.4f}")
+        print(f"  Low realized vol (vol_edge < -5%): {len(low_realized)} fills, avg markout=${low_realized['markout_5s'].mean():.4f}")
+
+        if len(high_realized) >= MIN_SAMPLES_FOR_SIGNIFICANCE and len(low_realized) >= MIN_SAMPLES_FOR_SIGNIFICANCE:
+            comparison = compare_groups(high_realized['markout_5s'], low_realized['markout_5s'],
+                                       "High Real Vol", "Low Real Vol")
+            print(f"  {comparison}")
+
+    # Test: when vol_edge is positive and we buy below strike, do we make money?
+    print(f"\nDirectional vol edge test:")
+    if 'vol_edge_15m' in df_vol.columns:
+        # Note: We don't have moneyness directly, but we can infer from theo
+        # If theo > 0.5, spot is likely above strike
+        # If theo < 0.5, spot is likely below strike
+
+        df_edge = df_vol[df_vol['vol_edge_15m'].notna()]
+
+        # When realized > implied and we bought: do we make money?
+        bought_high_vol = df_edge[(df_edge['vol_edge_15m'] > 0.03) & (df_edge['dir_yes'] == 1)]
+        sold_high_vol = df_edge[(df_edge['vol_edge_15m'] > 0.03) & (df_edge['dir_yes'] == -1)]
+        bought_low_vol = df_edge[(df_edge['vol_edge_15m'] < -0.03) & (df_edge['dir_yes'] == 1)]
+        sold_low_vol = df_edge[(df_edge['vol_edge_15m'] < -0.03) & (df_edge['dir_yes'] == -1)]
+
+        print(f"  Bought when realized > implied: {len(bought_high_vol)} fills, avg markout=${bought_high_vol['markout_5s'].mean():.4f}")
+        print(f"  Sold when realized > implied:   {len(sold_high_vol)} fills, avg markout=${sold_high_vol['markout_5s'].mean():.4f}")
+        print(f"  Bought when implied > realized: {len(bought_low_vol)} fills, avg markout=${bought_low_vol['markout_5s'].mean():.4f}")
+        print(f"  Sold when implied > realized:   {len(sold_low_vol)} fills, avg markout=${sold_low_vol['markout_5s'].mean():.4f}")
+
+    # Performance by edge vs realized vol theo buckets
+    print(f"\nMarkout by edge vs realized vol theo:")
+    df_vol['realized_edge_bucket'] = pd.cut(
+        df_vol['edge_vs_realized_theo'],
+        bins=[-np.inf, -0.02, -0.005, 0.005, 0.02, np.inf],
+        labels=['Large -ve', 'Small -ve', 'Neutral', 'Small +ve', 'Large +ve']
+    )
+
+    for bucket in df_vol['realized_edge_bucket'].cat.categories:
+        subset = df_vol[df_vol['realized_edge_bucket'] == bucket]
+        if len(subset) > 0:
+            print(f"  {bucket:12s}: {len(subset):3d} fills, avg markout=${subset['markout_5s'].mean():.4f}")
+
+    print(f"\n  Expected: Large +ve edge vs realized theo → positive markouts")
+    print(f"  If this pattern holds, realized vol theo has predictive power!")
+
+
 def momentum_attribution_analysis(df):
     """Test if momentum strategy is responsible for bad fills."""
     print("\n" + "=" * 80)
@@ -643,6 +748,7 @@ def main():
     directional_bias(df)
     volatility_spread_analysis(df)
     book_imbalance_analysis(df)  # NEW: Analyze book imbalance signal
+    realized_vol_theo_analysis(df)  # NEW: Compare realized vs implied vol theo
     momentum_attribution_analysis(df)
     summary_and_diagnosis(df)
 

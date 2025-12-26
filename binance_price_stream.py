@@ -7,7 +7,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import global_state
-from util import update_binance_fair_value_for_market, update_fair_value_for_market, bs_binary_call
+from util import update_binance_fair_value_for_market, update_fair_value_for_market, bs_binary_call, update_realized_vol
 from trading import perform_trade, MIN_ORDER_INTERVAL, cancel_order_async, EARLY_CANCEL_OPTION_MOVE
 
 BINANCE_WS = "wss://stream.binance.com:9443/ws/btcusdt@bookTicker"
@@ -183,6 +183,9 @@ def _update_binance_theos(binance_mid_usdt: float):
         return  # Price unchanged, skip recalculation
 
     _last_binance_mid_usd = binance_mid_usd
+
+    # Update realized vol estimates (5m and 15m)
+    update_realized_vol()
 
     # Update price blend Kalman filter
     if hasattr(global_state, 'price_blend_filter') and global_state.price_blend_filter is not None:

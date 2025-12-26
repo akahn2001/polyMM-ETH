@@ -116,6 +116,28 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
     binance_theo = global_state.binance_fair_value.get(market_id, 0.0)
     book_imbalance = getattr(global_state, "book_imbalance", {}).get(market_id, 0.0)
 
+    # Volatility tracking
+    implied_vol = global_state.fair_vol.get(market_id)
+    realized_vol_5m = getattr(global_state, 'realized_vol_5m', None)
+    realized_vol_15m = getattr(global_state, 'realized_vol_15m', None)
+
+    # Vol edge = realized - implied (positive means market underpricing vol)
+    vol_edge_5m = (realized_vol_5m - implied_vol) if (realized_vol_5m is not None and implied_vol is not None) else None
+    vol_edge_15m = (realized_vol_15m - implied_vol) if (realized_vol_15m is not None and implied_vol is not None) else None
+
+    # Calculate theo using realized vol instead of implied vol
+    realized_vol_theo = None
+    S_current = global_state.blended_price
+    if S_current is not None and realized_vol_15m is not None:
+        from util import bs_binary_call
+        K = global_state.strike
+        T = (global_state.exp - datetime.now(ZoneInfo("America/New_York"))).total_seconds() / (60 * 60 * 24 * 365)
+        if T > 0:
+            try:
+                realized_vol_theo = bs_binary_call(S_current, K, T, 0.0, realized_vol_15m, 0.0, 1.0)
+            except:
+                pass
+
     # Get market state
     book = global_state.all_data.get(market_id)
     market_mid = None
@@ -209,6 +231,13 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
         "token_type": "YES" if token_id == yes_token else "NO",
         "order_type": order_type,  # "GTC" for maker, "IOC" for taker
         "book_imbalance": book_imbalance,  # Order book imbalance at time of fill
+        # Volatility edge tracking
+        "implied_vol": implied_vol,
+        "realized_vol_5m": realized_vol_5m,
+        "realized_vol_15m": realized_vol_15m,
+        "vol_edge_5m": vol_edge_5m,  # realized_5m - implied (positive = market underpricing vol)
+        "vol_edge_15m": vol_edge_15m,  # realized_15m - implied
+        "realized_vol_theo": realized_vol_theo,  # theo priced with realized vol instead of implied
     })
 
 def _pct(vals, p):
@@ -326,6 +355,7 @@ def _write_detailed_fills_csv():
             "theo", "binance_theo", "market_mid", "fair_yes",
             "edge_vs_theo", "edge_vs_fair", "model_vs_market",
             "net_yes_before", "net_yes_after", "book_imbalance",
+            "implied_vol", "realized_vol_5m", "realized_vol_15m", "vol_edge_5m", "vol_edge_15m", "realized_vol_theo",
             "markout_1s", "markout_5s", "markout_15s", "markout_30s", "markout_60s"
         ]
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -369,6 +399,12 @@ def _write_detailed_fills_csv():
                 "net_yes_before": rec.get("net_yes_before"),
                 "net_yes_after": net_after,
                 "book_imbalance": rec.get("book_imbalance"),
+                "implied_vol": rec.get("implied_vol"),
+                "realized_vol_5m": rec.get("realized_vol_5m"),
+                "realized_vol_15m": rec.get("realized_vol_15m"),
+                "vol_edge_5m": rec.get("vol_edge_5m"),
+                "vol_edge_15m": rec.get("vol_edge_15m"),
+                "realized_vol_theo": rec.get("realized_vol_theo"),
                 "markout_1s": m.get(1),
                 "markout_5s": m.get(5),
                 "markout_15s": m.get(15),

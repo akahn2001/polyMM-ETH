@@ -1,9 +1,86 @@
 import math
+import time
+import numpy as np
 import global_state
 from scipy.stats import norm
 from kalman_filter import VolKalman1D
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+
+def compute_realized_vol(lookback_minutes: float = 15.0) -> float | None:
+    """
+    Calculate annualized realized volatility from Binance price history.
+
+    Uses log returns from the price history deque. Returns None if insufficient
+    data is available (cold start protection).
+
+    Parameters
+    ----------
+    lookback_minutes : float
+        How far back to look for price data (default 15 minutes)
+
+    Returns
+    -------
+    float or None
+        Annualized realized volatility, or None if insufficient data
+    """
+    if not hasattr(global_state, 'binance_price_history'):
+        return None
+
+    history = global_state.binance_price_history
+    if len(history) < 10:
+        return None
+
+    now = time.time()
+    cutoff = now - (lookback_minutes * 60)
+
+    # Filter to recent prices within lookback window
+    recent = [(t, p) for t, p in history if t >= cutoff]
+
+    # Require minimum data points for statistical validity
+    # For 15 min lookback with ~1 tick/sec, expect ~900 points
+    # Require at least 30 points (about 30 seconds of data)
+    min_required = max(30, int(lookback_minutes * 2))  # Scale with lookback
+    if len(recent) < min_required:
+        return None
+
+    # Calculate log returns
+    log_returns = []
+    for i in range(1, len(recent)):
+        t1, p1 = recent[i - 1]
+        t2, p2 = recent[i]
+        if p1 > 0 and p2 > 0 and (t2 - t1) > 0:
+            log_returns.append(math.log(p2 / p1))
+
+    if len(log_returns) < 10:
+        return None
+
+    # Calculate average time between samples
+    total_time = recent[-1][0] - recent[0][0]
+    if total_time <= 0:
+        return None
+
+    avg_dt = total_time / len(recent)
+
+    # Annualize: samples_per_year = seconds_per_year / avg_seconds_per_sample
+    seconds_per_year = 365 * 24 * 60 * 60
+    samples_per_year = seconds_per_year / avg_dt
+
+    std_return = np.std(log_returns)
+    realized_vol = std_return * math.sqrt(samples_per_year)
+
+    return realized_vol
+
+
+def update_realized_vol():
+    """
+    Update global state with current realized vol estimates (5min and 15min).
+    Call this periodically (e.g., every few seconds) or on price updates.
+    """
+    global_state.realized_vol_5m = compute_realized_vol(lookback_minutes=5.0)
+    global_state.realized_vol_15m = compute_realized_vol(lookback_minutes=15.0)
+
 
 # TODO: Do this to derive option strike
 """

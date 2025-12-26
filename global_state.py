@@ -82,6 +82,10 @@ blended_price = None
 vol_filters = {}
 fair_vol = {}
 
+# Realized vol estimates from Binance price history
+realized_vol_5m = None   # 5-minute realized vol (annualized)
+realized_vol_15m = None  # 15-minute realized vol (annualized)
+
 # RTDS-based fair values
 fair_value = {}
 binary_delta = {}
