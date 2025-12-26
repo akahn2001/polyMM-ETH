@@ -255,8 +255,8 @@ async def reconcile_loop():
 # TODO: QUOTE TIGHTER- I BELIEVE NEW ROUNDING LOGIC MEANS SPREAD=.03 IS NOT AS TIGHT AS WE THINK, TRY .02 or EVEN .015
 # TODO: REDUCE LATENCY, CLEAR PRINT STATEMENTS, REDUCE BACKGROUND TASKS
 # had .04 base width before, skew_k=1.0, min_order_interval=1.0, price_move_tol = .0035
-EDGE_TAKE_THRESHOLD = 0.080      # edge to justify crossing when OPENING position
-EDGE_TAKE_THRESHOLD_REDUCE = 0.05  # lower threshold when REDUCING position (closing risk is more valuable)
+EDGE_TAKE_THRESHOLD = 2.0      # edge to justify crossing when OPENING position
+EDGE_TAKE_THRESHOLD_REDUCE = 2.0  # lower threshold when REDUCING position (closing risk is more valuable)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 10             # max size for IOC orders that reduce position (also capped by position size)
 BASE_QUOTE_SPREAD = 0.060             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
@@ -264,7 +264,7 @@ MAX_POSITION = 10
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
 
-SKEW_K = .60          # 0.3–1.0, start ~0.6
+SKEW_K = .40          # 0.3–1.0, start ~0.6
 SKEW_CAP = 0.04       # max skew in price points (5c)
 
 MIN_PRICE = 0.01
@@ -285,14 +285,14 @@ MAX_MOMENTUM_ADJUSTMENT = 0.03  # Max price adjustment from momentum (caps at 3 
 
 # Dynamic spread based on option price sensitivity
 OPTION_MOVE_LOOKBACK = 0.5        # Seconds to look back for BTC move
-OPTION_MOVE_THRESHOLD = 0.02      # 2 cents - start widening when option moved this much
+OPTION_MOVE_THRESHOLD = 0.01      # 2 cents - start widening when option moved this much
 OPTION_MOVE_SPREAD_SCALE = 0.5    # spread multiplier per cent above threshold
 MAX_OPTION_SPREAD_MULT = 4.0      # Max spread multiplier cap
 
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = 0.01   # max fair value nudge (1 cent)
+MAX_IMBALANCE_ADJUSTMENT = 0.015   # max fair value nudge (1 cent)
 
 VERBOSE = False
 
@@ -893,14 +893,27 @@ async def perform_trade(market_id: str):
     # enforce minimum order size
     quote_size = int(max(5.0, raw_size))
 
+    # --- time-to-expiry position scaling ---
+    # Reduce max position near expiry to limit gamma risk
+    effective_max_position = MAX_POSITION
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    minutes_to_expiry = (global_state.exp - now_et).total_seconds() / 60.0
+
+    if minutes_to_expiry < 5.0:
+        # Halve max position in final 5 minutes, round to nearest multiple of 5
+        effective_max_position = round(MAX_POSITION / 2 / 5) * 5
+        effective_max_position = max(5, effective_max_position)  # minimum of 5
+        if VERBOSE:
+            print(f"[MM] Near expiry ({minutes_to_expiry:.1f}min left), reducing max position to {effective_max_position}")
+
     # --- dynamic inventory skew (scaled to spread, capped, stronger when "dangerous") ---
     # half spread should be the (possibly delta-adjusted) one you actually plan to quote
     half_spread = quote_spread / 2.0  # if you compute quote_spread dynamically
     # half_spread = QUOTE_SPREAD / 2.0 # if not
 
     inv_ratio = 0.0
-    if MAX_POSITION > 0:
-        inv_ratio = max(-1.0, min(1.0, net_yes / MAX_POSITION))  # net_yes = effective yes (filled+pending)
+    if effective_max_position > 0:
+        inv_ratio = max(-1.0, min(1.0, net_yes / effective_max_position))  # net_yes = effective yes (filled+pending)
 
     skew = -inv_ratio * (SKEW_K * half_spread)  # long YES -> skew down, short YES -> skew up
     skew *= mult  # make skew stronger when market is dangerous (high delta / near expiry)
@@ -939,8 +952,8 @@ async def perform_trade(market_id: str):
     if VERBOSE:
         print(f"[MM] edges: edge_bid_yes={edge_bid_yes:.4f}, edge_ask_yes={edge_ask_yes:.4f}")
 
-    max_buy_yes  = max(0.0, MAX_POSITION - net_yes)
-    max_buy_no   = max(0.0, net_yes + MAX_POSITION)
+    max_buy_yes  = max(0.0, effective_max_position - net_yes)
+    max_buy_no   = max(0.0, net_yes + effective_max_position)
     if VERBOSE:
         print(f"[MM] capacity: max_buy_yes={max_buy_yes}, max_buy_no={max_buy_no}")
 
