@@ -294,6 +294,9 @@ USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
 MAX_IMBALANCE_ADJUSTMENT = 0.015   # max fair value nudge (1 cent)
 
+# Early cancel threshold (option price sensitivity)
+EARLY_CANCEL_OPTION_MOVE = 0.5  # .5 cent option move triggers immediate cancel
+
 VERBOSE = False
 
 

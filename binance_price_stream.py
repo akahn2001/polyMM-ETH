@@ -3,13 +3,12 @@ import json
 import time
 import websockets
 import requests
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import global_state
-from util import update_binance_fair_value_for_market, update_fair_value_for_market
-from trading import perform_trade, MIN_ORDER_INTERVAL, cancel_order_async
-
-# Threshold for early cancellation (before full recalculation)
-EARLY_CANCEL_THRESHOLD = 3.0  # $3 move triggers immediate cancel
+from util import update_binance_fair_value_for_market, update_fair_value_for_market, bs_binary_call
+from trading import perform_trade, MIN_ORDER_INTERVAL, cancel_order_async, EARLY_CANCEL_OPTION_MOVE
 
 BINANCE_WS = "wss://stream.binance.com:9443/ws/btcusdt@bookTicker"
 BINANCE_TICKER_API = "https://api.binance.com/api/v3/ticker/bookTicker"
@@ -135,12 +134,37 @@ def _update_binance_theos(binance_mid_usdt: float):
     now = time.time()
     global_state.binance_price_history.append((now, binance_mid_usd))
 
-    # EARLY CANCEL: If price moved significantly, cancel the VULNERABLE side immediately
+    # EARLY CANCEL: If option price would move significantly, cancel the VULNERABLE side immediately
     # Binance UP → cancel ask (we'd sell too cheap)
     # Binance DOWN → cancel bid (we'd buy too high)
     if _last_binance_mid_usd is not None:
         price_move = binance_mid_usd - _last_binance_mid_usd
-        if abs(price_move) >= EARLY_CANCEL_THRESHOLD:
+
+        # Calculate option price move using BS model
+        option_move = 0.0
+        S_current = getattr(global_state, 'blended_price', None)
+        exp = getattr(global_state, 'exp', None)
+        strike = getattr(global_state, 'strike', None)
+
+        if S_current is not None and exp is not None and strike is not None and price_move != 0:
+            # Get vol from first market (they should all be similar)
+            sigma = None
+            fair_vol = getattr(global_state, 'fair_vol', {})
+            if fair_vol:
+                sigma = next(iter(fair_vol.values()), None)
+
+            if sigma is not None:
+                try:
+                    now_et = datetime.now(ZoneInfo("America/New_York"))
+                    T = (exp - now_et).total_seconds() / (60 * 60 * 24 * 365)
+                    if T > 0:
+                        current_option = bs_binary_call(S_current, strike, T, 0.0, sigma, 0.0, 1.0)
+                        shifted_option = bs_binary_call(S_current + price_move, strike, T, 0.0, sigma, 0.0, 1.0)
+                        option_move = abs(shifted_option - current_option)
+                except Exception:
+                    pass  # Fall back to not canceling
+
+        if option_move >= EARLY_CANCEL_OPTION_MOVE:
             vulnerable_side = "ask" if price_move > 0 else "bid"
             wom = getattr(global_state, "working_orders_by_market", {})
             for market_id, per_mkt in wom.items():
