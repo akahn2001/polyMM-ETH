@@ -288,6 +288,9 @@ def configure_market(market: dict, strike: float):
     if hasattr(global_state, 'ioc_order_deltas'):
         global_state.ioc_order_deltas.clear()
 
+    if hasattr(global_state, 'last_order_time'):
+        global_state.last_order_time.clear()
+
     # Set as active market
     global_state.active_market_id = condition_id
 
