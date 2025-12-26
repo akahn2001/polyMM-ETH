@@ -370,6 +370,71 @@ def volatility_spread_analysis(df):
         if len(paid_up_in_vol) > 0:
             print(f"    ⚠️  Getting picked off during volatile periods - widen spreads!")
 
+def book_imbalance_analysis(df):
+    """Analyze if book imbalance signal has predictive value."""
+    print("\n" + "=" * 80)
+    print("BOOK IMBALANCE ANALYSIS")
+    print("=" * 80)
+
+    if 'book_imbalance' not in df.columns:
+        print("  ⚠️  book_imbalance not in data - run with updated code")
+        print("     Delete detailed_fills.csv and restart bot to get this data")
+        return
+
+    # Filter out NaN values
+    df_imb = df[df['book_imbalance'].notna()]
+    if len(df_imb) == 0:
+        print("  ⚠️  No book imbalance data available")
+        return
+
+    # Correlation with markouts
+    imb_corr = df_imb['book_imbalance'].corr(df_imb['markout_5s'])
+    print(f"Book Imbalance → Markout correlation: {imb_corr:.3f}")
+    if imb_corr > 0.1:
+        print("  ✅ Positive correlation - imbalance has predictive power!")
+    elif imb_corr > 0:
+        print("  ⚠️  Weak positive correlation - imbalance helps slightly")
+    else:
+        print("  ❌ Negative/zero correlation - imbalance NOT predictive")
+
+    # Performance by imbalance regime
+    print(f"\nPerformance by book imbalance:")
+    strong_bid = df_imb[df_imb['book_imbalance'] > 0.3]
+    strong_ask = df_imb[df_imb['book_imbalance'] < -0.3]
+    neutral = df_imb[abs(df_imb['book_imbalance']) <= 0.3]
+
+    print(f"  Strong bid imbalance (>0.3):  {len(strong_bid):3d} fills, avg markout=${strong_bid['markout_5s'].mean():.4f}")
+    print(f"  Neutral (±0.3):               {len(neutral):3d} fills, avg markout=${neutral['markout_5s'].mean():.4f}")
+    print(f"  Strong ask imbalance (<-0.3): {len(strong_ask):3d} fills, avg markout=${strong_ask['markout_5s'].mean():.4f}")
+
+    # Check if trading WITH imbalance is better than against
+    # When imbalance > 0 and we buy (dir_yes = 1), we're trading WITH the flow
+    # When imbalance < 0 and we sell (dir_yes = -1), we're trading WITH the flow
+    with_flow = df_imb[((df_imb['book_imbalance'] > 0.2) & (df_imb['dir_yes'] == 1)) |
+                       ((df_imb['book_imbalance'] < -0.2) & (df_imb['dir_yes'] == -1))]
+    against_flow = df_imb[((df_imb['book_imbalance'] > 0.2) & (df_imb['dir_yes'] == -1)) |
+                          ((df_imb['book_imbalance'] < -0.2) & (df_imb['dir_yes'] == 1))]
+
+    print(f"\nTrading WITH order flow:     {len(with_flow):3d} fills, avg markout=${with_flow['markout_5s'].mean():.4f}")
+    print(f"Trading AGAINST order flow:  {len(against_flow):3d} fills, avg markout=${against_flow['markout_5s'].mean():.4f}")
+
+    if len(with_flow) > 0 and len(against_flow) > 0:
+        comparison = compare_groups(with_flow['markout_5s'], against_flow['markout_5s'], "With Flow", "Against Flow")
+        print(f"  Comparison: {comparison}")
+
+        if with_flow['markout_5s'].mean() > against_flow['markout_5s'].mean():
+            print("  ✅ Trading WITH order flow is more profitable!")
+            print("     → Book imbalance adjustment is helping")
+        else:
+            print("  ❌ Trading WITH order flow is WORSE")
+            print("     → Consider disabling USE_BOOK_IMBALANCE or reducing MAX_IMBALANCE_ADJUSTMENT")
+
+    # Summary stats
+    print(f"\nBook imbalance statistics:")
+    print(f"  Mean imbalance: {df_imb['book_imbalance'].mean():.3f}")
+    print(f"  Std imbalance:  {df_imb['book_imbalance'].std():.3f}")
+    print(f"  Min/Max:        {df_imb['book_imbalance'].min():.3f} / {df_imb['book_imbalance'].max():.3f}")
+
 def momentum_attribution_analysis(df):
     """Test if momentum strategy is responsible for bad fills."""
     print("\n" + "=" * 80)
@@ -577,6 +642,7 @@ def main():
     inventory_analysis(df)
     directional_bias(df)
     volatility_spread_analysis(df)
+    book_imbalance_analysis(df)  # NEW: Analyze book imbalance signal
     momentum_attribution_analysis(df)
     summary_and_diagnosis(df)
 

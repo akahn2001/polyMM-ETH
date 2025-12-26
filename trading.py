@@ -255,11 +255,11 @@ async def reconcile_loop():
 # TODO: QUOTE TIGHTER- I BELIEVE NEW ROUNDING LOGIC MEANS SPREAD=.03 IS NOT AS TIGHT AS WE THINK, TRY .02 or EVEN .015
 # TODO: REDUCE LATENCY, CLEAR PRINT STATEMENTS, REDUCE BACKGROUND TASKS
 # had .04 base width before, skew_k=1.0, min_order_interval=1.0, price_move_tol = .0035
-EDGE_TAKE_THRESHOLD = 0.070      # edge to justify crossing when OPENING position
-EDGE_TAKE_THRESHOLD_REDUCE = 0.03  # lower threshold when REDUCING position (closing risk is more valuable)
+EDGE_TAKE_THRESHOLD = 0.080      # edge to justify crossing when OPENING position
+EDGE_TAKE_THRESHOLD_REDUCE = 0.05  # lower threshold when REDUCING position (closing risk is more valuable)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 10             # max size for IOC orders that reduce position (also capped by position size)
-BASE_QUOTE_SPREAD = 0.050             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
+BASE_QUOTE_SPREAD = 0.060             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 10
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
@@ -288,6 +288,11 @@ OPTION_MOVE_LOOKBACK = 0.5        # Seconds to look back for BTC move
 OPTION_MOVE_THRESHOLD = 0.02      # 2 cents - start widening when option moved this much
 OPTION_MOVE_SPREAD_SCALE = 0.5    # spread multiplier per cent above threshold
 MAX_OPTION_SPREAD_MULT = 4.0      # Max spread multiplier cap
+
+# Book imbalance adjustment
+USE_BOOK_IMBALANCE = True
+BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
+MAX_IMBALANCE_ADJUSTMENT = 0.01   # max fair value nudge (1 cent)
 
 VERBOSE = False
 
@@ -514,6 +519,43 @@ async def cancel_many_orders(order_ids: list[str], max_retries: int = 3):
             #print(f"[CANCEL_MANY] Unexpected exception: {name}: {e}")
             return None
 
+def compute_book_imbalance(market_id: str) -> tuple[float, float, float]:
+    """
+    Compute order book imbalance for a market.
+
+    Returns: (imbalance, bid_depth, ask_depth)
+      imbalance: -1 to +1 where +1 = all bids, -1 = all asks
+      bid_depth: total size on bid side
+      ask_depth: total size on ask side
+    """
+    book = global_state.all_data.get(market_id)
+    if not book:
+        return 0.0, 0.0, 0.0
+
+    bids = book.get("bids")
+    asks = book.get("asks")
+    if not bids or not asks:
+        return 0.0, 0.0, 0.0
+
+    # Sum depth on each side (top N levels or all)
+    if BOOK_IMBALANCE_LEVELS > 0:
+        # Top N levels only
+        bid_items = list(bids.items())[-BOOK_IMBALANCE_LEVELS:]  # highest bids
+        ask_items = list(asks.items())[:BOOK_IMBALANCE_LEVELS]   # lowest asks
+        bid_depth = sum(size for price, size in bid_items)
+        ask_depth = sum(size for price, size in ask_items)
+    else:
+        # All levels
+        bid_depth = sum(size for price, size in bids.items())
+        ask_depth = sum(size for price, size in asks.items())
+
+    total = bid_depth + ask_depth
+    if total == 0:
+        return 0.0, 0.0, 0.0
+
+    imbalance = (bid_depth - ask_depth) / total
+    return imbalance, bid_depth, ask_depth
+
 def compute_edge_and_quotes(market_id):
     book = global_state.all_data.get(market_id)
     if not book:
@@ -728,6 +770,22 @@ async def perform_trade(market_id: str):
         else:
             # Missing data, no adjustment
             fair_yes = book_mid
+
+    # Book imbalance adjustment: lean quotes in direction of order flow
+    book_imbalance = 0.0
+    if USE_BOOK_IMBALANCE:
+        imbalance, bid_depth, ask_depth = compute_book_imbalance(market_id)
+        book_imbalance = imbalance
+        # More bids than asks → price likely rising → nudge fair up
+        imbalance_adj = imbalance * MAX_IMBALANCE_ADJUSTMENT
+        fair_yes += imbalance_adj
+        if VERBOSE and abs(imbalance) > 0.3:
+            print(f"[MM] Book imbalance: {imbalance:.2f} (bid={bid_depth:.0f}, ask={ask_depth:.0f}), adj={imbalance_adj:.4f}")
+
+    # Store imbalance in global_state for markout tracking
+    if not hasattr(global_state, "book_imbalance"):
+        global_state.book_imbalance = {}
+    global_state.book_imbalance[market_id] = book_imbalance
 
     pos_obj = global_state.positions_by_market.get(market_id)
     filled_yes = pos_obj.net_yes if pos_obj is not None else 0.0

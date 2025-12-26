@@ -114,6 +114,7 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
     delta = global_state.binary_delta.get(market_id, 0.0)
     theo = global_state.fair_value.get(market_id, 0.0)
     binance_theo = global_state.binance_fair_value.get(market_id, 0.0)
+    book_imbalance = getattr(global_state, "book_imbalance", {}).get(market_id, 0.0)
 
     # Get market state
     book = global_state.all_data.get(market_id)
@@ -207,6 +208,7 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
         "side": side.upper(),
         "token_type": "YES" if token_id == yes_token else "NO",
         "order_type": order_type,  # "GTC" for maker, "IOC" for taker
+        "book_imbalance": book_imbalance,  # Order book imbalance at time of fill
     })
 
 def _pct(vals, p):
@@ -323,7 +325,7 @@ def _write_detailed_fills_csv():
             "binance_momentum", "momentum_volatility", "delta",
             "theo", "binance_theo", "market_mid", "fair_yes",
             "edge_vs_theo", "edge_vs_fair", "model_vs_market",
-            "net_yes_before", "net_yes_after",
+            "net_yes_before", "net_yes_after", "book_imbalance",
             "markout_1s", "markout_5s", "markout_15s", "markout_30s", "markout_60s"
         ]
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -366,6 +368,7 @@ def _write_detailed_fills_csv():
                 "model_vs_market": rec.get("model_vs_market"),
                 "net_yes_before": rec.get("net_yes_before"),
                 "net_yes_after": net_after,
+                "book_imbalance": rec.get("book_imbalance"),
                 "markout_1s": m.get(1),
                 "markout_5s": m.get(5),
                 "markout_15s": m.get(15),
