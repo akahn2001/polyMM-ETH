@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 USER_OWNER_ID = "36e9b72d-fb6b-151f-0ad7-869f32584268"
 
 # Shadow trading flag
-trading_enabled = True
-dry_run = False  # Set to False to enable live trading
+trading_enabled = False  # Scheduler enables this after configuring first market, DO NOT TOGGLE THIS MANUALLY
+dry_run = False  # Set to False to enable live trading, DO TOGGLE THIS MANUALLY
 
 # Bot start timestamp (for uptime tracking)
 bot_start_ts = None
