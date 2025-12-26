@@ -256,7 +256,7 @@ async def reconcile_loop():
 # TODO: QUOTE TIGHTER- I BELIEVE NEW ROUNDING LOGIC MEANS SPREAD=.03 IS NOT AS TIGHT AS WE THINK, TRY .02 or EVEN .015
 # TODO: REDUCE LATENCY, CLEAR PRINT STATEMENTS, REDUCE BACKGROUND TASKS
 # had .04 base width before, skew_k=1.0, min_order_interval=1.0, price_move_tol = .0035
-EDGE_TAKE_THRESHOLD = 0.055      # edge to justify crossing #.0275, was .04 12/19 night
+EDGE_TAKE_THRESHOLD = 0.050      # edge to justify crossing #.0275, was .04 12/19 night
 TAKER_SIZE_MULT = 1.0
 BASE_QUOTE_SPREAD = 0.035             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 10
