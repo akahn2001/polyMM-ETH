@@ -1,10 +1,23 @@
 import asyncio  # Asynchronous I/O
 import json  # JSON handling
+import socket  # Socket options for TCP_NODELAY
 import websockets  # WebSocket client
 import traceback  # Exception handling
 from process_data import process_data, process_book_data, process_user_data, process_price_change
 import time
 import global_state
+
+
+def _set_tcp_nodelay(ws):
+    """Disable Nagle's algorithm for lower latency."""
+    try:
+        transport = ws.transport
+        if transport is not None:
+            sock = transport.get_extra_info('socket')
+            if sock is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except Exception:
+        pass  # Best effort - don't crash if this fails
 
 #chunk = ["106393185783537449644078805690800189614172565600484574723938260022241088055271"]
 
@@ -36,6 +49,9 @@ async def connect_market_websocket(chunk):
         uri = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
         try:
             async with websockets.connect(uri, ping_interval=5, ping_timeout=None) as websocket:
+                # Disable Nagle's algorithm for lower latency
+                _set_tcp_nodelay(websocket)
+
                 # Prepare and send subscription message
                 message = {"assets_ids": tokens_to_subscribe}
                 await websocket.send(json.dumps(message))
@@ -91,6 +107,9 @@ async def connect_user_websocket(key, secret, passphrase):
     uri = "wss://ws-subscriptions-clob.polymarket.com/ws/user"
 
     async with websockets.connect(uri, ping_interval=5, ping_timeout=None) as websocket:
+        # Disable Nagle's algorithm for lower latency
+        _set_tcp_nodelay(websocket)
+
         # Prepare authentication message with API credentials
         message = {
             "type": "user",

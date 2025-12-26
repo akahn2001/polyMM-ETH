@@ -1,5 +1,6 @@
 import asyncio
 import json
+import socket
 import time
 import websockets
 import requests
@@ -7,6 +8,18 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import global_state
+
+
+def _set_tcp_nodelay(ws):
+    """Disable Nagle's algorithm for lower latency."""
+    try:
+        transport = ws.transport
+        if transport is not None:
+            sock = transport.get_extra_info('socket')
+            if sock is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except Exception:
+        pass
 from util import update_binance_fair_value_for_market, update_fair_value_for_market, bs_binary_call, update_realized_vol
 from trading import perform_trade, MIN_ORDER_INTERVAL, cancel_order_async, EARLY_CANCEL_OPTION_MOVE
 
@@ -236,6 +249,9 @@ async def stream_binance_btcusdt_mid(on_mid=None, *, verbose=False):
                 close_timeout=5,
                 max_queue=1024,
             ) as ws:
+                # Disable Nagle's algorithm for lower latency
+                _set_tcp_nodelay(ws)
+
                 backoff = 1.0
                 if verbose:
                     print("[BINANCE] connected")

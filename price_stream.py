@@ -1,11 +1,24 @@
 import asyncio
 import json
+import socket
 import websockets
 from datetime import datetime, timezone
 from util import update_fair_value_for_market
 from trading import perform_trade
 
 import global_state
+
+
+def _set_tcp_nodelay(ws):
+    """Disable Nagle's algorithm for lower latency."""
+    try:
+        transport = ws.transport
+        if transport is not None:
+            sock = transport.get_extra_info('socket')
+            if sock is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except Exception:
+        pass
 
 RTDS_URL = "wss://ws-live-data.polymarket.com"
 
@@ -43,6 +56,9 @@ async def stream_btc_usd():
         try:
             print("[RTDS] Attempting websocket connection...")
             async with websockets.connect(RTDS_URL, ping_interval=None, open_timeout=10) as ws:
+                # Disable Nagle's algorithm for lower latency
+                _set_tcp_nodelay(ws)
+
                 print("[RTDS] Websocket connected, sending subscription...")
                 # Subscribe to BTC/USD Chainlink crypto price stream
                 await ws.send(json.dumps(SUBSCRIBE_MSG))
