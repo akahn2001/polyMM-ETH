@@ -269,9 +269,10 @@ SKEW_CAP = 0.04       # max skew in price points (5c)
 
 MIN_PRICE = 0.01
 MAX_PRICE = 0.99
-PRICE_MOVE_TOL = 0.001          # don’t cancel/replace if existing quote is within 0.5c of target
+PRICE_MOVE_TOL = 0.001          # don't cancel/replace if existing quote is within 0.5c of target
 TICK_SIZE = .01
-MIN_TICKS_FROM_TOUCH = 0   # start with 2; try 1–3
+MIN_TICKS_BUILD = 1    # ticks from touch when building position (more conservative)
+MIN_TICKS_REDUCE = 0   # ticks from touch when reducing position (want to get filled)
 
 MIN_ORDER_INTERVAL = .50  # seconds → max 5 orders/sec per market+side, # changed this back to 1
 POST_FILL_COOLDOWN = 1.0  # seconds to pause quoting on a side after getting filled (GTC only)
@@ -856,12 +857,16 @@ async def perform_trade(market_id: str):
     target_bid_yes = max(MIN_PRICE, min(MAX_PRICE, tick_down(fair_adj_yes - half_spread, TICK_SIZE)))
     target_ask_yes = max(MIN_PRICE, min(MAX_PRICE, tick_up(fair_adj_yes + half_spread, TICK_SIZE)))
 
-    # 2) back off from touch (new)
-    # bid: don't be closer than N ticks to the best bid
-    target_bid_yes = min(target_bid_yes, best_bid_yes - MIN_TICKS_FROM_TOUCH * TICK_SIZE)
+    # 2) back off from touch - asymmetric based on inventory
+    # When building position: stay further from touch (adverse selection protection)
+    # When reducing position: stay closer to touch (want to get filled)
+    # BUY YES builds when net_yes >= 0, reduces when net_yes < 0
+    # BUY NO builds when net_yes <= 0, reduces when net_yes > 0
+    ticks_bid = MIN_TICKS_REDUCE if net_yes < 0 else MIN_TICKS_BUILD
+    ticks_ask = MIN_TICKS_REDUCE if net_yes > 0 else MIN_TICKS_BUILD
 
-    # ask: don't be closer than N ticks to the best ask
-    target_ask_yes = max(target_ask_yes, best_ask_yes + MIN_TICKS_FROM_TOUCH * TICK_SIZE)
+    target_bid_yes = min(target_bid_yes, best_bid_yes - ticks_bid * TICK_SIZE)
+    target_ask_yes = max(target_ask_yes, best_ask_yes + ticks_ask * TICK_SIZE)
 
     # 3) re-clip + re-tick (keep it clean)
     target_bid_yes = max(MIN_PRICE, min(MAX_PRICE, tick_down(target_bid_yes, TICK_SIZE)))
