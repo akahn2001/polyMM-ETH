@@ -24,7 +24,7 @@ from market_scheduler import load_btc_15min_markets, run_scheduler
 
 def update_once(client):
     # TODO: too much looping here is wasting time
-    all_markets = pd.read_csv("all_markets_df_12_25.csv")
+    all_markets = pd.read_csv("all_markets.csv")
     for row in all_markets.iterrows():
         row=row[1]
         tokens = row["tokens"]
@@ -237,7 +237,8 @@ async def main():
     global_state.client = client
 
     # Load all BTC 15-min markets from CSV
-    csv_path = "all_markets_df_12_25.csv"
+    # Run `python fetch_markets.py` to generate this file
+    csv_path = "all_markets.csv"
     all_markets = load_btc_15min_markets(csv_path)
     print(f"[MAIN] Loaded {len(all_markets)} BTC 15-min markets from {csv_path}")
 
