@@ -2,7 +2,6 @@ import global_state
 import asyncio
 import time
 import math
-import numpy as np
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from markouts import record_fill
@@ -256,9 +255,11 @@ async def reconcile_loop():
 # TODO: QUOTE TIGHTER- I BELIEVE NEW ROUNDING LOGIC MEANS SPREAD=.03 IS NOT AS TIGHT AS WE THINK, TRY .02 or EVEN .015
 # TODO: REDUCE LATENCY, CLEAR PRINT STATEMENTS, REDUCE BACKGROUND TASKS
 # had .04 base width before, skew_k=1.0, min_order_interval=1.0, price_move_tol = .0035
-EDGE_TAKE_THRESHOLD = 0.050      # edge to justify crossing #.0275, was .04 12/19 night
-TAKER_SIZE_MULT = 1.0
-BASE_QUOTE_SPREAD = 0.035             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
+EDGE_TAKE_THRESHOLD = 0.050      # edge to justify crossing when OPENING position
+EDGE_TAKE_THRESHOLD_REDUCE = 0.02  # lower threshold when REDUCING position (closing risk is more valuable)
+IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
+IOC_SIZE_REDUCE = 10             # max size for IOC orders that reduce position (also capped by position size)
+BASE_QUOTE_SPREAD = 0.040             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 10
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
@@ -268,7 +269,7 @@ SKEW_CAP = 0.04       # max skew in price points (5c)
 
 MIN_PRICE = 0.01
 MAX_PRICE = 0.99
-PRICE_MOVE_TOL = 0.0020          # don’t cancel/replace if existing quote is within 0.5c of target
+PRICE_MOVE_TOL = 0.001          # don’t cancel/replace if existing quote is within 0.5c of target
 TICK_SIZE = .01
 MIN_TICKS_FROM_TOUCH = 0   # start with 2; try 1–3
 
@@ -279,10 +280,11 @@ USE_BINANCE_MOMENTUM = False  # Toggle to use Binance momentum for predictive qu
 BINANCE_MOMENTUM_LOOKBACK = 0.5  # Seconds to look back for momentum calculation
 MAX_MOMENTUM_ADJUSTMENT = 0.03  # Max price adjustment from momentum (caps at 3 cents)
 
-# Dynamic spread based on momentum volatility
-USE_DYNAMIC_SPREAD = True  # Toggle to widen spread when momentum is volatile
-MOMENTUM_VOLATILITY_WINDOW = 5.0  # Seconds to measure momentum volatility
-MAX_VOLATILITY_SPREAD_MULT = 4.0  # Max spread multiplier (e.g., 3x wider)
+# Dynamic spread based on option price sensitivity
+OPTION_MOVE_LOOKBACK = 0.5        # Seconds to look back for BTC move
+OPTION_MOVE_THRESHOLD = 0.02      # 2 cents - start widening when option moved this much
+OPTION_MOVE_SPREAD_SCALE = 0.5    # spread multiplier per cent above threshold
+MAX_OPTION_SPREAD_MULT = 4.0      # Max spread multiplier cap
 
 VERBOSE = False
 
@@ -760,77 +762,57 @@ async def perform_trade(market_id: str):
     mult = 1.0 + min(2.0, abs_delta)  # tune numbers later
     mult = 1
 
-    # Calculate momentum volatility multiplier
-    volatility_mult = 1.0
-    current_momentum_mult = 1.0
-    momentum_adjustment_mult = 1.0  # Extra widening if using momentum adjustment
+    # Calculate spread multiplier based on option price sensitivity
+    option_move_mult = 1.0
 
-    if USE_DYNAMIC_SPREAD and hasattr(global_state, 'binance_price_history') and len(global_state.binance_price_history) >= 5:
-        # Get current momentum (may not be set if USE_BINANCE_MOMENTUM=False)
-        current_momentum = 0.0
-        if len(global_state.binance_price_history) >= 2:
-            current_binance = global_state.binance_price_history[-1][1]
-            for ts, price in reversed(list(global_state.binance_price_history)[:-1]):
-                if now - ts >= BINANCE_MOMENTUM_LOOKBACK:
-                    current_momentum = abs(current_binance - price)
-                    break
+    if hasattr(global_state, 'binance_price_history') and len(global_state.binance_price_history) >= 2:
+        # Get BTC price change over lookback window
+        current_binance = global_state.binance_price_history[-1][1]
+        old_binance = None
+        for ts, price in reversed(list(global_state.binance_price_history)[:-1]):
+            if now - ts >= OPTION_MOVE_LOOKBACK:
+                old_binance = price
+                break
 
-        # Widen for LARGE CURRENT MOMENTUM (smooth big moves)
-        if current_momentum > 3:  # $3+ move (very sensitive!)
-            current_momentum_mult = 1.0 + min(3.0, (current_momentum - 3) / 12.0)
-            # Examples:
-            # $3 momentum = 1.0x (no widening)
-            # $5 momentum = 1.17x (wider!)
-            # $9 momentum = 1.5x
-            # $15+ momentum = 2.0x (max 4x total)
+        if old_binance is not None:
+            btc_move = current_binance - old_binance
 
-        # Calculate recent momentum values for VOLATILITY (choppiness)
-        recent_momentums = []
-        prices = global_state.binance_price_history
+            # Reprice option at both prices to get option price delta
+            S_current = global_state.blended_price
+            sigma = global_state.fair_vol.get(market_id)
 
-        # Get prices within volatility window
-        recent_prices = [(t, p) for t, p in prices if now - t <= MOMENTUM_VOLATILITY_WINDOW]
+            if S_current is not None and sigma is not None and btc_move != 0:
+                K = global_state.strike
+                now_et = datetime.now(ZoneInfo("America/New_York"))
+                T = (global_state.exp - now_et).total_seconds() / (60 * 60 * 24 * 365)
+                r = 0.0
+                q = 0.0
+                payoff = 1.0
 
-        if len(recent_prices) >= 3:
-            # Calculate momentum at multiple points to measure volatility
-            for i in range(len(recent_prices) - 1):
-                t1, p1 = recent_prices[i]
-                t2, p2 = recent_prices[i + 1]
-                if t2 - t1 > 0.1:  # At least 0.1s apart
-                    momentum = p2 - p1
-                    recent_momentums.append(momentum)
+                if T > 0:
+                    # Price option at current spot
+                    current_option_price = bs_binary_call(S_current, K, T, r, sigma, q, payoff)
 
-            if len(recent_momentums) >= 2:
-                # Calculate std dev of momentum changes (volatility)
-                momentum_std = np.std(recent_momentums)
+                    # Price option at spot + recent BTC move
+                    S_shifted = S_current + btc_move
+                    shifted_option_price = bs_binary_call(S_shifted, K, T, r, sigma, q, payoff)
 
-                # Scale volatility to spread multiplier (CHOPPINESS)
-                # High volatility (>$1 std) = wider spread
-                # Low volatility (<$1 std) = normal spread
-                if momentum_std > 1:  # Much more sensitive! (was 5)
-                    volatility_mult = 1.0 + min(MAX_VOLATILITY_SPREAD_MULT - 1.0, (momentum_std - 1) / 10.0)
-                    # Examples:
-                    # $1 std = 1.0x (no widening)
-                    # $6 std = 1.5x
-                    # $11+ std = 2.0x (max)
+                    # Option price move in cents
+                    option_move = abs(shifted_option_price - current_option_price)
 
-                    # Debug output when spread widens significantly
-                    if volatility_mult > 1.5 and VERBOSE:
-                        print(f"[MM] High momentum volatility: std=${momentum_std:.2f}, widening spread by {volatility_mult:.2f}x")
+                    # If option moved more than threshold, widen spread
+                    if option_move > OPTION_MOVE_THRESHOLD:
+                        excess = option_move - OPTION_MOVE_THRESHOLD
+                        option_move_mult = 1.0 + min(MAX_OPTION_SPREAD_MULT - 1.0, excess * OPTION_MOVE_SPREAD_SCALE / 0.01)
+                        # Examples (with THRESHOLD=0.02, SCALE=0.5):
+                        # 2c option move = 1.0x (no widening)
+                        # 4c option move = 1.0 + (0.02 * 0.5 / 0.01) = 2.0x
+                        # 6c option move = 1.0 + (0.04 * 0.5 / 0.01) = 3.0x
 
-        # Use the LARGER of the two multipliers (protect against both types of risk)
-        if current_momentum_mult > 1.5 and VERBOSE:
-            print(f"[MM] Large current momentum: ${current_momentum:.2f}, widening spread by {current_momentum_mult:.2f}x")
+                        if VERBOSE:
+                            print(f"[MM] Option sensitivity: BTC move=${btc_move:.2f}, option move={option_move:.4f}, spread mult={option_move_mult:.2f}x")
 
-    # If using momentum adjustment, widen extra to compensate for VPN lag
-    if USE_BINANCE_MOMENTUM:
-        # Always widen 1.5x minimum when momentum strategy is active
-        # This protects from VPN lag during quote adjustments
-        momentum_adjustment_mult = 1.5
-
-    # Apply the larger of volatility, current momentum, or momentum adjustment multiplier
-    dynamic_mult = max(volatility_mult, current_momentum_mult, momentum_adjustment_mult)
-    quote_spread = BASE_QUOTE_SPREAD * mult * mult_warm * dynamic_mult
+    quote_spread = BASE_QUOTE_SPREAD * mult * mult_warm * option_move_mult
 
     raw_size = BASE_SIZE / mult
     raw_size = BASE_SIZE
@@ -884,33 +866,54 @@ async def perform_trade(market_id: str):
     if VERBOSE:
         print(f"[MM] capacity: max_buy_yes={max_buy_yes}, max_buy_no={max_buy_no}")
 
-    # ----- aggressive IOC path -----
-    if edge_ask_yes > EDGE_TAKE_THRESHOLD and max_buy_yes > 0:
-        size = min(int((quote_size*TAKER_SIZE_MULT)), max_buy_yes)
-        if VERBOSE:
-            print(f"[MM] TAKE BUY YES: size={size}, px={best_ask_yes}")
-        await send_order(
-            yes_token,
-            "BUY",
-            best_ask_yes,
-            size,
-            "IOC",
-            market_id=market_id,
-        )
+    # ----- aggressive IOC path (parallel execution) -----
+    ioc_tasks = []
 
-    if edge_bid_yes > EDGE_TAKE_THRESHOLD and max_buy_no > 0:
-        size = min(int((quote_size*TAKER_SIZE_MULT)), max_buy_no)
+    # Use lower edge threshold when REDUCING position (more willing to close risk)
+    # BUY YES reduces position when net_yes < 0 (short YES, buying brings us closer to 0)
+    # BUY NO reduces position when net_yes > 0 (long YES, buying NO brings us closer to 0)
+    threshold_buy_yes = EDGE_TAKE_THRESHOLD_REDUCE if net_yes < 0 else EDGE_TAKE_THRESHOLD
+    threshold_buy_no = EDGE_TAKE_THRESHOLD_REDUCE if net_yes > 0 else EDGE_TAKE_THRESHOLD
+
+    if edge_ask_yes > threshold_buy_yes and max_buy_yes > 0:
+        # BUY YES reduces position when net_yes < 0, builds when net_yes >= 0
+        if net_yes < 0:
+            size = min(IOC_SIZE_REDUCE, int(abs(net_yes)), max_buy_yes)
+        else:
+            size = min(IOC_SIZE_BUILD, max_buy_yes)
+        if size > 0:
+            if VERBOSE:
+                print(f"[MM] TAKE BUY YES: size={size}, px={best_ask_yes}, threshold={threshold_buy_yes:.3f}")
+            ioc_tasks.append(send_order(
+                yes_token,
+                "BUY",
+                best_ask_yes,
+                size,
+                "IOC",
+                market_id=market_id,
+            ))
+
+    if edge_bid_yes > threshold_buy_no and max_buy_no > 0:
+        # BUY NO reduces position when net_yes > 0, builds when net_yes <= 0
+        if net_yes > 0:
+            size = min(IOC_SIZE_REDUCE, int(abs(net_yes)), max_buy_no)
+        else:
+            size = min(IOC_SIZE_BUILD, max_buy_no)
         price_no = yes_to_no_price(best_bid_yes)
-        if VERBOSE:
-            print(f"[MM] TAKE BUY NO: size={size}, px={price_no}")
-        await send_order(
-            no_token,
-            "BUY",
-            price_no,
-            size,
-            "IOC",
-            market_id=market_id,
-        )
+        if size > 0:
+            if VERBOSE:
+                print(f"[MM] TAKE BUY NO: size={size}, px={price_no}, threshold={threshold_buy_no:.3f}")
+            ioc_tasks.append(send_order(
+                no_token,
+                "BUY",
+                price_no,
+                size,
+                "IOC",
+                market_id=market_id,
+            ))
+
+    if ioc_tasks:
+        await asyncio.gather(*ioc_tasks)
 
     # ----- resting GTC path -----
     async def manage_side(side_key: str):
@@ -986,8 +989,11 @@ async def perform_trade(market_id: str):
                 f"(fair_adj_yes={fair_adj_yes:.4f}, pos_yes={net_yes})"
             )
 
-    await manage_side("bid")
-    await manage_side("ask")
+    # Run both sides in parallel for faster quote updates
+    await asyncio.gather(
+        manage_side("bid"),
+        manage_side("ask")
+    )
 
 
 def get_protected_mm_order_ids() -> set[str]:
