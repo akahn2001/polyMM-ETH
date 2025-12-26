@@ -271,7 +271,7 @@ PRICE_MOVE_TOL = 0.0020          # don’t cancel/replace if existing quote is w
 TICK_SIZE = .01
 MIN_TICKS_FROM_TOUCH = 1   # start with 2; try 1–3
 
-MIN_ORDER_INTERVAL = .75  # seconds → max 5 orders/sec per market+side, # changed this back to 1
+MIN_ORDER_INTERVAL = .50  # seconds → max 5 orders/sec per market+side, # changed this back to 1
 
 # Binance momentum adjustment
 USE_BINANCE_MOMENTUM = False  # Toggle to use Binance momentum for predictive quoting
