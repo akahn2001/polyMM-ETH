@@ -2,7 +2,7 @@ import json
 from sortedcontainers import SortedDict
 import global_state as global_state
 from util import update_fair_vol_for_market, update_fair_value_for_market, update_binance_fair_value_for_market
-from trading import update_position_yes_space, perform_trade
+from trading import update_position_yes_space, perform_trade, VERBOSE
 #import poly_data.CONSTANTS as CONSTANTS
 
 #from trading import perform_trade
@@ -204,7 +204,8 @@ def process_user_data(rows):
                         ioc_market_id, ioc_delta, _ts = ioc_info
                         if hasattr(global_state, "pending_order_delta") and ioc_market_id in global_state.pending_order_delta:
                             global_state.pending_order_delta[ioc_market_id] -= ioc_delta
-                            print(f"[IOC ORDER TERMINAL] Removed pending delta {ioc_delta:.1f} for order {order_id} (status={status}), new pending_delta={global_state.pending_order_delta[ioc_market_id]:.1f}")
+                            if VERBOSE:
+                                print(f"[IOC ORDER TERMINAL] Removed pending delta {ioc_delta:.1f} for order {order_id} (status={status}), new pending_delta={global_state.pending_order_delta[ioc_market_id]:.1f}")
             else:
                 orders_for_market[order_id] = {
                     "order_id": order_id,
@@ -243,16 +244,13 @@ def process_user_data(rows):
                 )
 
                 pos = global_state.positions_by_market.get(market)
-                if pos is not None:
-                    print(
-                        f"[POS] market={market} net_yes={pos.net_yes} "
-                        f"vwap_yes={pos.vwap_yes:.4f}"
-                    )
+                if VERBOSE and pos is not None:
+                    print(f"[POS] market={market} net_yes={pos.net_yes} vwap_yes={pos.vwap_yes:.4f}")
 
                 try:
                     asyncio.create_task(perform_trade(market))
                 except RuntimeError:
-                    print("[USER FILL-ORDER] No running event loop for perform_trade")
+                    pass
 
         # ------------- TRADE EVENTS (taker fills) -------------
         elif event_type == "trade":
@@ -280,17 +278,19 @@ def process_user_data(rows):
             #)
 
             if trade_size <= 0:
-                print("[USER TRADE] Zero-size trade, skipping position update")
+                if VERBOSE:
+                    print("[USER TRADE] Zero-size trade, skipping position update")
                 continue
 
             # Only update positions for OUR trades (when we are the taker)
             if my_owner is not None and owner is not None and owner != my_owner:
-                print("[USER TRADE] Trade not ours (owner mismatch), NOT updating position")
+                # Very frequent - other traders' fills, don't print
                 continue
 
             # Skip non-fill statuses to avoid double counting
             if status not in ("MATCHED", "FILLED"):
-                print(f"[USER TRADE] Ignoring status={status} for position update")
+                if VERBOSE:
+                    print(f"[USER TRADE] Ignoring status={status} for position update")
                 continue
 
             # ✅ Update YES-space position for taker-side fills (IOC)
@@ -311,18 +311,17 @@ def process_user_data(rows):
                     ioc_market_id, ioc_delta, _ts = ioc_info
                     if hasattr(global_state, "pending_order_delta") and ioc_market_id in global_state.pending_order_delta:
                         global_state.pending_order_delta[ioc_market_id] -= ioc_delta
-                        print(f"[IOC FILL] Removed pending delta {ioc_delta:.1f} for order {order_id}, new pending_delta={global_state.pending_order_delta[ioc_market_id]:.1f}")
+                        if VERBOSE:
+                            print(f"[IOC FILL] Removed pending delta {ioc_delta:.1f} for order {order_id}, new pending_delta={global_state.pending_order_delta[ioc_market_id]:.1f}")
 
-            pos = global_state.positions_by_market.get(market)
-            if pos is not None:
-                print(
-                    f"[POS] market={market} net_yes={pos.net_yes} "
-                    f"vwap_yes={pos.vwap_yes:.4f}"
-                )
-            else:
-                print(f"[POS] No position object yet for market={market}")
+            if VERBOSE:
+                pos = global_state.positions_by_market.get(market)
+                if pos is not None:
+                    print(f"[POS] market={market} net_yes={pos.net_yes} vwap_yes={pos.vwap_yes:.4f}")
+                else:
+                    print(f"[POS] No position object yet for market={market}")
 
             try:
                 asyncio.create_task(perform_trade(market))
             except RuntimeError:
-                print("[USER TRADE] No running event loop for perform_trade")
+                pass

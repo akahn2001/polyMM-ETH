@@ -74,8 +74,9 @@ async def markout_loop():
             if (now - rec.get("ts", now)) < max_age or not rec.get("written_to_csv", False)
         ]
         cleaned = before_len - len(global_state.markouts)
-        if cleaned > 0:
-            print(f"[MARKOUT] Cleaned {cleaned} old fills from memory, {len(global_state.markouts)} remaining")
+        # Only print cleanup messages in verbose mode
+        # if cleaned > 0:
+        #     print(f"[MARKOUT] Cleaned {cleaned} old fills from memory, {len(global_state.markouts)} remaining")
 
         await asyncio.sleep(0.25)
 
