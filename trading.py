@@ -256,7 +256,7 @@ async def reconcile_loop():
 # TODO: QUOTE TIGHTER- I BELIEVE NEW ROUNDING LOGIC MEANS SPREAD=.03 IS NOT AS TIGHT AS WE THINK, TRY .02 or EVEN .015
 # TODO: REDUCE LATENCY, CLEAR PRINT STATEMENTS, REDUCE BACKGROUND TASKS
 # had .04 base width before, skew_k=1.0, min_order_interval=1.0, price_move_tol = .0035
-EDGE_TAKE_THRESHOLD = 0.07      # edge to justify crossing #.0275, was .04 12/19 night
+EDGE_TAKE_THRESHOLD = 0.055      # edge to justify crossing #.0275, was .04 12/19 night
 TAKER_SIZE_MULT = 1.0
 BASE_QUOTE_SPREAD = 0.035             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 10
@@ -657,7 +657,7 @@ async def perform_trade(market_id: str):
     # Blend theo (75%) with book mid (25%) for quoting
     # Theo reacts to Binance, book mid anchors to market reality
     theo = info["fair"]  # global_state.fair_value[market_id]
-    fair_yes = 0.50 * theo + 0.50 * book_mid
+    fair_yes = 0.75 * theo + 0.25 * book_mid
 
     # Add Binance momentum adjustment if enabled (skip entirely when disabled for speed)
     if not USE_BINANCE_MOMENTUM:
