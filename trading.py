@@ -571,6 +571,10 @@ async def perform_trade(market_id: str):
       - Cheap YES -> BUY YES
       - Rich YES  -> BUY NO (instead of SELL YES)
     """
+    # Only trade the active market configured by the scheduler
+    if market_id != global_state.active_market_id:
+        return
+
     now = time.time()  # Cache time once for this call
     #return # TODO: return to prevent even printing
     if VERBOSE:
