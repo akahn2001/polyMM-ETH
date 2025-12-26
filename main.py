@@ -3,6 +3,14 @@ import time                    # Time functions
 import asyncio                 # Asynchronous I/O
 import traceback               # Exception handling
 import threading               # Thread management
+
+# Use uvloop for faster async (2-4x speedup on event loop operations)
+try:
+    import uvloop
+    uvloop.install()
+    print("[INIT] uvloop installed - using faster event loop")
+except ImportError:
+    print("[INIT] uvloop not available - using default asyncio")
 import pandas as pd
 import ast
 import csv
