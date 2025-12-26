@@ -264,7 +264,7 @@ MAX_POSITION = 10
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
 
-SKEW_K = .50          # 0.3–1.0, start ~0.6
+SKEW_K = .65          # 0.3–1.0, start ~0.6
 SKEW_CAP = 0.04       # max skew in price points (5c)
 
 MIN_PRICE = 0.01
