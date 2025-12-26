@@ -255,11 +255,11 @@ async def reconcile_loop():
 # TODO: QUOTE TIGHTER- I BELIEVE NEW ROUNDING LOGIC MEANS SPREAD=.03 IS NOT AS TIGHT AS WE THINK, TRY .02 or EVEN .015
 # TODO: REDUCE LATENCY, CLEAR PRINT STATEMENTS, REDUCE BACKGROUND TASKS
 # had .04 base width before, skew_k=1.0, min_order_interval=1.0, price_move_tol = .0035
-EDGE_TAKE_THRESHOLD = 0.050      # edge to justify crossing when OPENING position
-EDGE_TAKE_THRESHOLD_REDUCE = 0.02  # lower threshold when REDUCING position (closing risk is more valuable)
+EDGE_TAKE_THRESHOLD = 0.070      # edge to justify crossing when OPENING position
+EDGE_TAKE_THRESHOLD_REDUCE = 0.03  # lower threshold when REDUCING position (closing risk is more valuable)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 10             # max size for IOC orders that reduce position (also capped by position size)
-BASE_QUOTE_SPREAD = 0.040             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
+BASE_QUOTE_SPREAD = 0.050             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 10
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
@@ -274,6 +274,7 @@ TICK_SIZE = .01
 MIN_TICKS_FROM_TOUCH = 0   # start with 2; try 1–3
 
 MIN_ORDER_INTERVAL = .50  # seconds → max 5 orders/sec per market+side, # changed this back to 1
+POST_FILL_COOLDOWN = 1.0  # seconds to pause quoting on a side after getting filled (GTC only)
 
 # Binance momentum adjustment
 USE_BINANCE_MOMENTUM = False  # Toggle to use Binance momentum for predictive quoting
@@ -624,6 +625,19 @@ def update_position_yes_space(market_id: str, outcome_token: str, side: str, siz
         if pos.net_yes == 0:
             pos.vwap_yes = 0.0
 
+    # Track fill time for post-fill cooldown (GTC fills only)
+    # BUY YES fill → pause "bid" side, BUY NO fill → pause "ask" side
+    if order_type == "GTC" and side == "buy":
+        if not hasattr(global_state, "last_fill_time"):
+            global_state.last_fill_time = {}
+        if market_id not in global_state.last_fill_time:
+            global_state.last_fill_time[market_id] = {"bid": 0.0, "ask": 0.0}
+
+        if outcome_token == yes_token:
+            global_state.last_fill_time[market_id]["bid"] = time.time()
+        elif outcome_token == no_token:
+            global_state.last_fill_time[market_id]["ask"] = time.time()
+
     if VERBOSE:
         print(
             f"[UPDATE POS] market={market_id} token_side={which}/{side} "
@@ -943,6 +957,13 @@ async def perform_trade(market_id: str):
                     existing["cancel_requested_at"] = time.time()
                     await cancel_order_async(existing["id"])
                 wo[side_key] = None
+            return
+
+        # Post-fill cooldown: don't place new order on this side if recently filled
+        last_fill = getattr(global_state, "last_fill_time", {}).get(market_id, {}).get(side_key, 0.0)
+        if now - last_fill < POST_FILL_COOLDOWN:
+            if VERBOSE:
+                print(f"[MM] manage_side {side_key}: in post-fill cooldown ({now - last_fill:.2f}s < {POST_FILL_COOLDOWN}s)")
             return
 
         size = min(quote_size, max_size)
