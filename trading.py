@@ -301,12 +301,16 @@ async def send_order(token_id: str, side: str, price: float, size: float, tif: s
         pos_obj = global_state.positions_by_market.get(market_id)
         filled_yes = pos_obj.net_yes if pos_obj is not None else 0.0
 
-        # pending net YES from currently open orders snapshot
+        # pending net YES from working_orders_by_market (GTC orders)
         pending_yes = 0.0
-        for o in getattr(global_state, "open_orders", []) or []:
-            tok = o.get("token_id") or o.get("asset_id") or o.get("tokenId") or o.get("assetId")
-            sde = (o.get("side") or "").upper()
-            qty = float(o.get("size") or o.get("original_size") or o.get("remaining_size") or 0.0)
+        wo = getattr(global_state, "working_orders_by_market", {}).get(market_id, {})
+        for side_key in ("bid", "ask"):
+            entry = wo.get(side_key)
+            if not isinstance(entry, dict):
+                continue
+            tok = entry.get("token")
+            sde = (entry.get("side") or "").upper()
+            qty = float(entry.get("size") or 0.0)
             if qty <= 0:
                 continue
 
@@ -315,7 +319,15 @@ async def send_order(token_id: str, side: str, price: float, size: float, tif: s
             elif tok == no_token:
                 pending_yes += -qty if sde == "BUY" else +qty
 
-        effective_yes = filled_yes + pending_yes
+        # Also include pending_order_delta (tracks IOC orders - decays quickly since IOC resolves in <1s)
+        # Decay: reduce pending delta by half each check (rapid decay for stale IOC tracking)
+        if hasattr(global_state, "pending_order_delta") and market_id in global_state.pending_order_delta:
+            # Decay pending delta (IOC orders resolve in <1 second)
+            global_state.pending_order_delta[market_id] *= 0.5
+            if abs(global_state.pending_order_delta[market_id]) < 0.1:
+                global_state.pending_order_delta[market_id] = 0.0
+        pending_delta = getattr(global_state, "pending_order_delta", {}).get(market_id, 0.0)
+        effective_yes = filled_yes + pending_yes + pending_delta
 
         # delta from THIS order
         if token_id == yes_token:
@@ -365,6 +377,27 @@ async def send_order(token_id: str, side: str, price: float, size: float, tif: s
     # Update timestamp BEFORE sending to clip bursts
     global_state.last_order_time[key] = now
 
+    # Track pending order delta BEFORE placing order (for IOC orders only - GTC tracked in working_orders)
+    order_delta = 0.0
+    if tif == "IOC":
+        if not hasattr(global_state, "pending_order_delta"):
+            global_state.pending_order_delta = {}
+        if market_id not in global_state.pending_order_delta:
+            global_state.pending_order_delta[market_id] = 0.0
+        if not hasattr(global_state, "ioc_order_deltas"):
+            global_state.ioc_order_deltas = {}  # {order_id: (market_id, delta)}
+
+        # Calculate delta for this order
+        yes_token = global_state.condition_to_token_id.get(market_id)
+        no_token = global_state.REVERSE_TOKENS.get(yes_token) if yes_token else None
+        if token_id == yes_token:
+            order_delta = +size if side == "BUY" else -size
+        elif token_id == no_token:
+            order_delta = -size if side == "BUY" else +size
+
+        # Add to pending delta BEFORE placing order
+        global_state.pending_order_delta[market_id] += order_delta
+
     # 2) DRY RUN mode – only print what we *would* do
     if getattr(global_state, "dry_run", False):
         print(f"[DRY_RUN] Would place {tif} {side} {size} @ {price:.4f} on token {token_id} (market={market_id})")
@@ -380,10 +413,16 @@ async def send_order(token_id: str, side: str, price: float, size: float, tif: s
             size,
             tif,
         )
+        # Track IOC order_id -> delta mapping for position tracking
+        if tif == "IOC" and order_delta != 0.0 and order_id:
+            global_state.ioc_order_deltas[order_id] = (market_id, order_delta)
         #print(f"[SEND_ORDER] Placed {tif} {side} {size} @ {price:.4f} on token {token_id} (market={market_id}) -> {order_id}")
         return order_id
 
     except PolyApiException as e:
+        # Revert pending delta on failure (IOC only)
+        if order_delta != 0.0:
+            global_state.pending_order_delta[market_id] -= order_delta
         if e.status_code == 401:
             print(f"[SEND_ORDER] 401 Unauthorized - refreshing credentials...")
             try:
@@ -392,6 +431,9 @@ async def send_order(token_id: str, side: str, price: float, size: float, tif: s
                 print(f"[SEND_ORDER] Failed to refresh creds: {refresh_err}")
         return None
     except Exception as e:
+        # Revert pending delta on failure (IOC only)
+        if order_delta != 0.0:
+            global_state.pending_order_delta[market_id] -= order_delta
         #print(f"[SEND_ORDER][ERROR] Unexpected exception: {e}")
         return None
 

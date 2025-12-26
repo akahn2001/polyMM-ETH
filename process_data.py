@@ -247,6 +247,7 @@ def process_user_data(rows):
         # ------------- TRADE EVENTS (taker fills) -------------
         elif event_type == "trade":
             trade_id = row.get("id", "")
+            order_id = row.get("order_id", "")  # IOC order ID that generated this trade
             status   = row.get("status", "")
             outcome  = row.get("outcome", "")
 
@@ -291,6 +292,16 @@ def process_user_data(rows):
                 price=trade_price,
                 order_type="IOC",
             )
+
+            # Remove IOC order delta from pending_order_delta to avoid double-counting
+            # (The fill is now reflected in filled_yes via update_position_yes_space)
+            if order_id and hasattr(global_state, "ioc_order_deltas"):
+                ioc_info = global_state.ioc_order_deltas.pop(order_id, None)
+                if ioc_info is not None:
+                    ioc_market_id, ioc_delta = ioc_info
+                    if hasattr(global_state, "pending_order_delta") and ioc_market_id in global_state.pending_order_delta:
+                        global_state.pending_order_delta[ioc_market_id] -= ioc_delta
+                        print(f"[IOC FILL] Removed pending delta {ioc_delta:.1f} for order {order_id}, new pending_delta={global_state.pending_order_delta[ioc_market_id]:.1f}")
 
             pos = global_state.positions_by_market.get(market)
             if pos is not None:

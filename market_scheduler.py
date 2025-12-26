@@ -271,6 +271,11 @@ def configure_market(market: dict, strike: float):
     if condition_id not in global_state.working_orders_by_market:
         global_state.working_orders_by_market[condition_id] = {'bid': None, 'ask': None}
 
+    # Reset pending order delta for this market (fresh start)
+    if not hasattr(global_state, 'pending_order_delta'):
+        global_state.pending_order_delta = {}
+    global_state.pending_order_delta[condition_id] = 0.0
+
     # Set as active market
     global_state.active_market_id = condition_id
 
