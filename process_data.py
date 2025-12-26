@@ -195,6 +195,16 @@ def process_user_data(rows):
                 if order_id in orders_for_market:
                     #print(f"[USER ORDER] Removing order {order_id} from working_orders_by_market")
                     orders_for_market.pop(order_id, None)
+
+                # Clean up IOC order delta if this was an IOC order that terminated
+                # (handles KILLED orders that didn't fill, or partial fills)
+                if order_id and hasattr(global_state, "ioc_order_deltas"):
+                    ioc_info = global_state.ioc_order_deltas.pop(order_id, None)
+                    if ioc_info is not None:
+                        ioc_market_id, ioc_delta, _ts = ioc_info
+                        if hasattr(global_state, "pending_order_delta") and ioc_market_id in global_state.pending_order_delta:
+                            global_state.pending_order_delta[ioc_market_id] -= ioc_delta
+                            print(f"[IOC ORDER TERMINAL] Removed pending delta {ioc_delta:.1f} for order {order_id} (status={status}), new pending_delta={global_state.pending_order_delta[ioc_market_id]:.1f}")
             else:
                 orders_for_market[order_id] = {
                     "order_id": order_id,
@@ -298,7 +308,7 @@ def process_user_data(rows):
             if order_id and hasattr(global_state, "ioc_order_deltas"):
                 ioc_info = global_state.ioc_order_deltas.pop(order_id, None)
                 if ioc_info is not None:
-                    ioc_market_id, ioc_delta = ioc_info
+                    ioc_market_id, ioc_delta, _ts = ioc_info
                     if hasattr(global_state, "pending_order_delta") and ioc_market_id in global_state.pending_order_delta:
                         global_state.pending_order_delta[ioc_market_id] -= ioc_delta
                         print(f"[IOC FILL] Removed pending delta {ioc_delta:.1f} for order {order_id}, new pending_delta={global_state.pending_order_delta[ioc_market_id]:.1f}")

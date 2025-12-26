@@ -124,10 +124,37 @@ def _extract_id(o):
         return o.get("id") or o.get("orderID") or o.get("order_id")
     return getattr(o, "id", None) or getattr(o, "order_id", None)
 
+IOC_STALE_THRESHOLD = 30.0  # seconds - clean up IOC deltas older than this
+
+def cleanup_stale_ioc_deltas():
+    """
+    Remove IOC order deltas that are older than IOC_STALE_THRESHOLD seconds.
+    This is a safety net in case websocket misses TRADE/ORDER events.
+    """
+    if not hasattr(global_state, "ioc_order_deltas"):
+        return
+
+    now = time.time()
+    stale_orders = []
+
+    for order_id, (market_id, delta, ts) in list(global_state.ioc_order_deltas.items()):
+        age = now - ts
+        if age > IOC_STALE_THRESHOLD:
+            stale_orders.append((order_id, market_id, delta, age))
+
+    for order_id, market_id, delta, age in stale_orders:
+        global_state.ioc_order_deltas.pop(order_id, None)
+        if hasattr(global_state, "pending_order_delta") and market_id in global_state.pending_order_delta:
+            global_state.pending_order_delta[market_id] -= delta
+            print(f"[IOC STALE CLEANUP] Removed stale IOC delta {delta:.1f} for order {order_id} (age={age:.1f}s), new pending_delta={global_state.pending_order_delta[market_id]:.1f}")
+
 async def reconcile_loop_all():
     while True:
         t0 = time.time()
         try:
+            # Clean up any stale IOC deltas (safety net for missed websocket events)
+            cleanup_stale_ioc_deltas()
+
             protected = get_all_protected_ids()
             #print("PROTECTED IDS FOR DEBUG!!!: ", protected)
             # TODO: see if we are protecting too many orders
@@ -319,13 +346,8 @@ async def send_order(token_id: str, side: str, price: float, size: float, tif: s
             elif tok == no_token:
                 pending_yes += -qty if sde == "BUY" else +qty
 
-        # Also include pending_order_delta (tracks IOC orders - decays quickly since IOC resolves in <1s)
-        # Decay: reduce pending delta by half each check (rapid decay for stale IOC tracking)
-        if hasattr(global_state, "pending_order_delta") and market_id in global_state.pending_order_delta:
-            # Decay pending delta (IOC orders resolve in <1 second)
-            global_state.pending_order_delta[market_id] *= 0.5
-            if abs(global_state.pending_order_delta[market_id]) < 0.1:
-                global_state.pending_order_delta[market_id] = 0.0
+        # Include pending_order_delta (tracks in-flight IOC orders)
+        # Delta is added when IOC order is placed, removed when TRADE event confirms fill
         pending_delta = getattr(global_state, "pending_order_delta", {}).get(market_id, 0.0)
         effective_yes = filled_yes + pending_yes + pending_delta
 
@@ -385,7 +407,7 @@ async def send_order(token_id: str, side: str, price: float, size: float, tif: s
         if market_id not in global_state.pending_order_delta:
             global_state.pending_order_delta[market_id] = 0.0
         if not hasattr(global_state, "ioc_order_deltas"):
-            global_state.ioc_order_deltas = {}  # {order_id: (market_id, delta)}
+            global_state.ioc_order_deltas = {}  # {order_id: (market_id, delta, timestamp)}
 
         # Calculate delta for this order
         yes_token = global_state.condition_to_token_id.get(market_id)
@@ -415,7 +437,7 @@ async def send_order(token_id: str, side: str, price: float, size: float, tif: s
         )
         # Track IOC order_id -> delta mapping for position tracking
         if tif == "IOC" and order_delta != 0.0 and order_id:
-            global_state.ioc_order_deltas[order_id] = (market_id, order_delta)
+            global_state.ioc_order_deltas[order_id] = (market_id, order_delta, now)
         #print(f"[SEND_ORDER] Placed {tif} {side} {size} @ {price:.4f} on token {token_id} (market={market_id}) -> {order_id}")
         return order_id
 
