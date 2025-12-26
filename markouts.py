@@ -65,6 +65,18 @@ async def markout_loop():
                     m[h] = pnl
                     done.add(h)
 
+        # Clean up old fills to prevent memory leak
+        # Remove fills older than 120s that have been written to CSV
+        max_age = 120  # 2x the longest markout horizon (60s)
+        before_len = len(global_state.markouts)
+        global_state.markouts = [
+            rec for rec in global_state.markouts
+            if (now - rec.get("ts", now)) < max_age or not rec.get("written_to_csv", False)
+        ]
+        cleaned = before_len - len(global_state.markouts)
+        if cleaned > 0:
+            print(f"[MARKOUT] Cleaned {cleaned} old fills from memory, {len(global_state.markouts)} remaining")
+
         await asyncio.sleep(0.25)
 
 def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC"):

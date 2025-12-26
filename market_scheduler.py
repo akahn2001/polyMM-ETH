@@ -276,6 +276,18 @@ def configure_market(market: dict, strike: float):
         global_state.pending_order_delta = {}
     global_state.pending_order_delta[condition_id] = 0.0
 
+    # Clean up stale tracking data to prevent memory leaks
+    if hasattr(global_state, 'filled_size_by_order'):
+        old_count = len(global_state.filled_size_by_order)
+        global_state.filled_size_by_order.clear()
+        print(f"[SCHEDULER] Cleared {old_count} stale order fill records")
+
+    if hasattr(global_state, 'processed_trade_ids'):
+        global_state.processed_trade_ids.clear()
+
+    if hasattr(global_state, 'ioc_order_deltas'):
+        global_state.ioc_order_deltas.clear()
+
     # Set as active market
     global_state.active_market_id = condition_id
 
