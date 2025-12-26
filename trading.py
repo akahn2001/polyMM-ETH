@@ -273,6 +273,7 @@ PRICE_MOVE_TOL = 0.001          # don't cancel/replace if existing quote is with
 TICK_SIZE = .01
 MIN_TICKS_BUILD = 1    # ticks from touch when building position (more conservative)
 MIN_TICKS_REDUCE = 0   # ticks from touch when reducing position (want to get filled)
+MIN_EDGE_TO_QUOTE = 0.02  # minimum edge (in price points) required to quote a side
 
 MIN_ORDER_INTERVAL = .50  # seconds → max 5 orders/sec per market+side, # changed this back to 1
 POST_FILL_COOLDOWN = 1.0  # seconds to pause quoting on a side after getting filled (GTC only)
@@ -945,13 +946,27 @@ async def perform_trade(market_id: str):
             max_size = max_buy_yes
             token_id = yes_token
             side_str = "BUY"
+            edge = fair_adj_yes - target_bid_yes  # how much below fair we're bidding
         else:
             desired_price = target_bid_no
             max_size = max_buy_no
             token_id = no_token
             side_str = "BUY"
+            edge = target_ask_yes - fair_adj_yes  # how much above fair we're asking
         if VERBOSE:
-            print(f"[MM] manage_side {side_key}: desired_price={desired_price}, max_size={max_size}, existing={existing}")
+            print(f"[MM] manage_side {side_key}: desired_price={desired_price}, max_size={max_size}, edge={edge:.4f}, existing={existing}")
+
+        # Don't quote if we don't have minimum edge
+        if edge < MIN_EDGE_TO_QUOTE:
+            if existing is not None:
+                if VERBOSE:
+                    print(f"[MM] manage_side {side_key}: cancel (no edge: {edge:.4f} < {MIN_EDGE_TO_QUOTE}) id={existing['id']}")
+                if not existing.get("cancel_requested"):
+                    existing["cancel_requested"] = True
+                    existing["cancel_requested_at"] = time.time()
+                    await cancel_order_async(existing["id"])
+                wo[side_key] = None
+            return
 
         if max_size <= 0:
             if existing is not None:
