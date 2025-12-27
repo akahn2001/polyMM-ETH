@@ -106,12 +106,11 @@ samples = []
 
 def get_initial_perp_biases() -> tuple[float, float]:
     """
-    Fetch current perp premiums (mark - index) for Binance and Kraken.
-    Returns (binance_premium, kraken_premium) in USD.
+    Fetch current perp premium (mark - index) for Binance.
+    Returns (binance_premium, binance_premium) - same value for both perps.
     Falls back to (0.0, 0.0) if fetch fails.
     """
     binance_premium = 0.0
-    kraken_premium = 0.0
 
     # Fetch Binance perp premium (mark - index)
     try:
@@ -127,30 +126,11 @@ def get_initial_perp_biases() -> tuple[float, float]:
         binance_premium = mark_price - index_price
         funding_rate = float(data["lastFundingRate"]) * 3 * 365 * 100  # Annualized %
         print(f"[INIT] Binance perp premium: ${binance_premium:+.2f} (funding: {funding_rate:+.1f}%/yr)")
+        print(f"[INIT] Using Binance premium for both perp biases")
     except Exception as e:
         print(f"[INIT] Failed to fetch Binance perp data: {e}")
 
-    # Fetch Kraken perp premium (mark - index)
-    try:
-        response = requests.get(
-            "https://futures.kraken.com/derivatives/api/v3/tickers",
-            timeout=5
-        )
-        response.raise_for_status()
-        data = response.json()
-        # Find PI_XBTUSD ticker
-        for ticker in data.get("tickers", []):
-            if ticker.get("symbol") == "PI_XBTUSD":
-                mark_price = float(ticker.get("markPrice", 0))
-                index_price = float(ticker.get("index", 0))
-                kraken_premium = mark_price - index_price
-                funding_rate = float(ticker.get("fundingRate", 0.0)) * 24 * 365 * 100  # Annualized %
-                print(f"[INIT] Kraken perp premium: ${kraken_premium:+.2f} (funding: {funding_rate:+.1f}%/yr)")
-                break
-    except Exception as e:
-        print(f"[INIT] Failed to fetch Kraken perp data: {e}")
-
-    return binance_premium, kraken_premium
+    return binance_premium, binance_premium
 
 
 def _set_tcp_nodelay(ws):
@@ -274,13 +254,11 @@ async def stream_binance_perp():
 
                     # Update perp Kalman filter with Binance perp price
                     if kalman_perp_filter is None:
-                        # Initialize filter with Binance perp premium as initial bias for both
-                        # (Kraken API fetch is unreliable, use Binance as proxy)
+                        # Initialize filter with Binance perp premium as initial bias
                         binance_bias, _ = get_initial_perp_biases()
                         kalman_perp_filter = PriceBlendKalmanPerps(
                             x0=binance_perp_mid,
-                            initial_binance_perp_bias=binance_bias,
-                            initial_kraken_perp_bias=binance_bias  # Use Binance bias for both
+                            initial_binance_perp_bias=binance_bias
                         )
                     kalman_perp_filter.update_binance_perp(binance_perp_mid)
                     blended_perp_price = kalman_perp_filter.x
@@ -416,12 +394,6 @@ async def stream_kraken_futures():
                                     kraken_perp_ask = float(data["ask"])
                                     kraken_perp_mid = 0.5 * (kraken_perp_bid + kraken_perp_ask)
                                     kraken_perp_ts = now
-
-                                    # Update perp Kalman filter with Kraken perp price
-                                    if kalman_perp_filter is not None:
-                                        kalman_perp_filter.update_kraken_perp(kraken_perp_mid)
-                                        blended_perp_price = kalman_perp_filter.x
-                                        blended_perp_ts = time.time()
                                 except (ValueError, TypeError):
                                     pass
 
@@ -442,12 +414,6 @@ async def stream_kraken_futures():
 
                                     kraken_perp_mid = 0.5 * (kraken_perp_bid + kraken_perp_ask)
                                     kraken_perp_ts = now
-
-                                    # Update perp Kalman filter with Kraken perp price
-                                    if kalman_perp_filter is not None:
-                                        kalman_perp_filter.update_kraken_perp(kraken_perp_mid)
-                                        blended_perp_price = kalman_perp_filter.x
-                                        blended_perp_ts = time.time()
                                 except (IndexError, ValueError, TypeError, KeyError):
                                     pass
 
