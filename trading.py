@@ -970,8 +970,10 @@ async def perform_trade(market_id: str):
     if VERBOSE:
         print(f"[MM] edges: edge_bid_yes={edge_bid_yes:.4f}, edge_ask_yes={edge_ask_yes:.4f}")
 
-    max_buy_yes  = max(0.0, effective_max_position - net_yes)
-    max_buy_no   = max(0.0, net_yes + effective_max_position)
+    # Use filled_yes (not net_yes) for capacity to avoid phantom headroom from pending orders
+    # Pending orders that reduce position shouldn't create room for new position-increasing orders
+    max_buy_yes  = max(0.0, effective_max_position - filled_yes)
+    max_buy_no   = max(0.0, filled_yes + effective_max_position)
     if VERBOSE:
         print(f"[MM] capacity: max_buy_yes={max_buy_yes}, max_buy_no={max_buy_no}")
 
