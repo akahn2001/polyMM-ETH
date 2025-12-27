@@ -274,12 +274,13 @@ async def stream_binance_perp():
 
                     # Update perp Kalman filter with Binance perp price
                     if kalman_perp_filter is None:
-                        # Initialize filter with current perp premiums as initial biases
-                        binance_bias, kraken_bias = get_initial_perp_biases()
+                        # Initialize filter with Binance perp premium as initial bias for both
+                        # (Kraken API fetch is unreliable, use Binance as proxy)
+                        binance_bias, _ = get_initial_perp_biases()
                         kalman_perp_filter = PriceBlendKalmanPerps(
                             x0=binance_perp_mid,
                             initial_binance_perp_bias=binance_bias,
-                            initial_kraken_perp_bias=kraken_bias
+                            initial_kraken_perp_bias=binance_bias  # Use Binance bias for both
                         )
                     kalman_perp_filter.update_binance_perp(binance_perp_mid)
                     blended_perp_price = kalman_perp_filter.x
