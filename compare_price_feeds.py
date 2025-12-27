@@ -218,8 +218,8 @@ async def stream_binance_perp():
                     #   "a": "98235.67",    # best ask price
                     #   "A": "3.456"        # best ask qty
                     # }
-                    binance_perp_bid = float(data["b"]) * usdt_usd_rate
-                    binance_perp_ask = float(data["a"]) * usdt_usd_rate
+                    binance_perp_bid = float(data["b"])
+                    binance_perp_ask = float(data["a"])
                     binance_perp_mid = 0.5 * (binance_perp_bid + binance_perp_ask)
                     binance_perp_ts = time.time()
 
