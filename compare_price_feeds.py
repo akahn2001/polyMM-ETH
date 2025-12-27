@@ -339,11 +339,18 @@ async def stream_kraken_futures():
                             asks = data.get("asks", [])
                             if bids and asks:
                                 try:
-                                    kraken_perp_bid = float(bids[0][0])
-                                    kraken_perp_ask = float(asks[0][0])
+                                    # Kraken Futures book format is list of dicts: [{"price": "100000", "qty": "5000"}, ...]
+                                    if isinstance(bids[0], dict):
+                                        kraken_perp_bid = float(bids[0]["price"])
+                                        kraken_perp_ask = float(asks[0]["price"])
+                                    # Or list of lists: [[price, qty], ...]
+                                    else:
+                                        kraken_perp_bid = float(bids[0][0])
+                                        kraken_perp_ask = float(asks[0][0])
+
                                     kraken_perp_mid = 0.5 * (kraken_perp_bid + kraken_perp_ask)
                                     kraken_perp_ts = now
-                                except (IndexError, ValueError, TypeError):
+                                except (IndexError, ValueError, TypeError, KeyError):
                                     pass
 
         except (asyncio.CancelledError, KeyboardInterrupt):
