@@ -30,7 +30,7 @@ class PriceBlendKalmanPerps:
         rtds_meas_var: float = 2.0**2,  # High trust in RTDS for level (same as original blend)
         binance_perp_meas_var: float = 3.5**2,  # ~5x less trust than RTDS (funding bias, but fast)
         kraken_perp_meas_var: float = 4.0**2,  # ~7.5x less trust (funding bias + slower)
-        bias_learning_rate: float = 0.05,  # Faster bias learning for quicker calibration
+        bias_learning_rate: float = 0.15,  # Much faster bias learning - perps can have significant funding bias
     ):
         """
         Parameters
