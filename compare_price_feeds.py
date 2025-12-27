@@ -283,27 +283,32 @@ async def stream_kraken_futures():
                 backoff = 1.0
                 print("[KRAKEN FUTURES] Connected to Futures WS")
 
-                # Subscribe to PI_XBTUSD ticker for index price
-                ticker_msg = {
+                # Subscribe to both ticker and book in one message
+                subscribe_msg = {
                     "event": "subscribe",
                     "feed": "ticker",
                     "product_ids": ["PI_XBTUSD"]
                 }
-                await ws.send(json.dumps(ticker_msg))
+                await ws.send(json.dumps(subscribe_msg))
 
-                # Subscribe to PI_XBTUSD book for best bid/ask
-                book_msg = {
+                # Also subscribe to book feed
+                book_subscribe_msg = {
                     "event": "subscribe",
                     "feed": "book",
                     "product_ids": ["PI_XBTUSD"]
                 }
-                await ws.send(json.dumps(book_msg))
+                await ws.send(json.dumps(book_subscribe_msg))
 
                 async for msg in ws:
                     data = json.loads(msg)
 
-                    # Look for messages
+                    # Debug: print subscription responses
                     if isinstance(data, dict):
+                        event = data.get("event")
+                        if event in ("info", "subscribed", "error"):
+                            print(f"[KRAKEN FUTURES] {data}")
+                            continue
+
                         feed = data.get("feed")
                         now = time.time()
 
@@ -317,15 +322,18 @@ async def stream_kraken_futures():
                                 except (ValueError, TypeError):
                                     pass
 
+                            # Also extract bid/ask from ticker if available
+                            if "bid" in data and "ask" in data:
+                                try:
+                                    kraken_perp_bid = float(data["bid"])
+                                    kraken_perp_ask = float(data["ask"])
+                                    kraken_perp_mid = 0.5 * (kraken_perp_bid + kraken_perp_ask)
+                                    kraken_perp_ts = now
+                                except (ValueError, TypeError):
+                                    pass
+
                         # Book feed has best bid/ask
                         elif feed in ("book_snapshot", "book"):
-                            # book_snapshot format:
-                            # {
-                            #   "feed": "book_snapshot",
-                            #   "product_id": "PI_XBTUSD",
-                            #   "bids": [[price, qty], ...],
-                            #   "asks": [[price, qty], ...]
-                            # }
                             bids = data.get("bids", [])
                             asks = data.get("asks", [])
                             if bids and asks:
