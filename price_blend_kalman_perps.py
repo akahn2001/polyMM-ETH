@@ -28,9 +28,11 @@ class PriceBlendKalmanPerps:
         P0: float = 500.0**2,  # High initial uncertainty for fast calibration
         process_var_per_sec: float = 10.0**2,
         rtds_meas_var: float = 2.0**2,  # High trust in RTDS for level (same as original blend)
-        binance_perp_meas_var: float = 3.5**2,  # ~5x less trust than RTDS (funding bias, but fast)
-        kraken_perp_meas_var: float = 4.0**2,  # ~7.5x less trust (funding bias + slower)
+        binance_perp_meas_var: float = 4.0**2,  # ~5x less trust than RTDS (funding bias, but fast)
+        kraken_perp_meas_var: float = 4.5**2,  # ~7.5x less trust (funding bias + slower)
         bias_learning_rate: float = 0.15,  # Much faster bias learning - perps can have significant funding bias
+        initial_binance_perp_bias: float = 0.0,  # Initialize with current funding-driven premium
+        initial_kraken_perp_bias: float = 0.0,  # Initialize with current funding-driven premium
     ):
         """
         Parameters
@@ -64,8 +66,8 @@ class PriceBlendKalmanPerps:
 
         # Bias tracking with exponential moving average
         self.rtds_bias = 0.0
-        self.binance_perp_bias = 0.0  # Will learn funding-driven bias
-        self.kraken_perp_bias = 0.0  # Will learn funding-driven bias
+        self.binance_perp_bias = initial_binance_perp_bias  # Initialize with current funding premium
+        self.kraken_perp_bias = initial_kraken_perp_bias  # Initialize with current funding premium
         self.bias_alpha = bias_learning_rate  # EMA smoothing factor
 
         # Track observations for bias estimation
