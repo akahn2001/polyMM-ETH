@@ -16,6 +16,7 @@ import time
 import csv
 import os
 import socket
+import traceback
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import websockets
@@ -348,7 +349,10 @@ async def stream_kraken_futures():
         except (asyncio.CancelledError, KeyboardInterrupt):
             raise
         except Exception as e:
-            print(f"[KRAKEN FUTURES] Error: {e}, reconnecting in {backoff:.1f}s")
+            print(f"[KRAKEN FUTURES] Error: {e}")
+            print(f"[KRAKEN FUTURES] Full traceback:")
+            traceback.print_exc()
+            print(f"[KRAKEN FUTURES] Reconnecting in {backoff:.1f}s")
             await asyncio.sleep(backoff)
             backoff = min(30.0, backoff * 1.5)
 
