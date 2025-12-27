@@ -987,9 +987,9 @@ async def perform_trade(market_id: str):
     threshold_buy_no = EDGE_TAKE_THRESHOLD_REDUCE if net_yes > 0 else EDGE_TAKE_THRESHOLD
 
     if edge_ask_yes > threshold_buy_yes and max_buy_yes > 0:
-        # BUY YES reduces position when net_yes < 0, builds when net_yes >= 0
-        if net_yes < 0:
-            size = min(IOC_SIZE_REDUCE, int(abs(net_yes)), max_buy_yes)
+        # BUY YES reduces position when short (filled_yes < 0), builds when long/flat
+        if filled_yes < 0:
+            size = min(IOC_SIZE_REDUCE, int(abs(filled_yes)), max_buy_yes)
         else:
             size = min(IOC_SIZE_BUILD, max_buy_yes)
         if size > 0:
@@ -1005,9 +1005,9 @@ async def perform_trade(market_id: str):
             ))
 
     if edge_bid_yes > threshold_buy_no and max_buy_no > 0:
-        # BUY NO reduces position when net_yes > 0, builds when net_yes <= 0
-        if net_yes > 0:
-            size = min(IOC_SIZE_REDUCE, int(abs(net_yes)), max_buy_no)
+        # BUY NO reduces position when long (filled_yes > 0), builds when short/flat
+        if filled_yes > 0:
+            size = min(IOC_SIZE_REDUCE, int(abs(filled_yes)), max_buy_no)
         else:
             size = min(IOC_SIZE_BUILD, max_buy_no)
         price_no = yes_to_no_price(best_bid_yes)
