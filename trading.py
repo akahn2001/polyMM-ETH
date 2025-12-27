@@ -338,11 +338,13 @@ async def send_order(token_id: str, side: str, price: float, size: float, tif: s
         yes_token = global_state.condition_to_token_id[market_id]
         no_token = global_state.REVERSE_TOKENS[yes_token]
 
-        # filled net YES
+        # filled net YES - this is the ACTUAL position from confirmed fills
         pos_obj = global_state.positions_by_market.get(market_id)
         filled_yes = pos_obj.net_yes if pos_obj is not None else 0.0
 
         # pending net YES from working_orders_by_market (GTC orders)
+        # ONLY count orders that INCREASE absolute position (consume limit headroom)
+        # Do NOT count orders that reduce position (they shouldn't create phantom headroom)
         pending_yes = 0.0
         wo = getattr(global_state, "working_orders_by_market", {}).get(market_id, {})
         for side_key in ("bid", "ask"):
@@ -355,10 +357,23 @@ async def send_order(token_id: str, side: str, price: float, size: float, tif: s
             if qty <= 0:
                 continue
 
+            # Calculate delta for this pending order
             if tok == yes_token:
-                pending_yes += qty if sde == "BUY" else -qty
+                order_delta = qty if sde == "BUY" else -qty
             elif tok == no_token:
-                pending_yes += -qty if sde == "BUY" else +qty
+                order_delta = -qty if sde == "BUY" else +qty
+            else:
+                continue
+
+            # Only count if this order would INCREASE absolute position
+            # (i.e., pushes position further from zero in the same direction)
+            if filled_yes >= 0 and order_delta > 0:
+                # Long position, order adds more long → count it
+                pending_yes += order_delta
+            elif filled_yes <= 0 and order_delta < 0:
+                # Short position, order adds more short → count it
+                pending_yes += order_delta
+            # Otherwise: order reduces position, don't count (no phantom headroom)
 
         # Include pending_order_delta (tracks in-flight IOC orders)
         # Delta is added when IOC order is placed, removed when TRADE event confirms fill
