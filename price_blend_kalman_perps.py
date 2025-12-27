@@ -25,12 +25,12 @@ class PriceBlendKalmanPerps:
     def __init__(
         self,
         x0: float = 88000.0,
-        P0: float = 100.0**2,
+        P0: float = 500.0**2,  # High initial uncertainty for fast calibration
         process_var_per_sec: float = 10.0**2,
         rtds_meas_var: float = 2.0**2,  # High trust in RTDS for level (same as original blend)
         binance_perp_meas_var: float = 4.5**2,  # ~5x less trust than RTDS (funding bias, but fast)
         kraken_perp_meas_var: float = 5.5**2,  # ~7.5x less trust (funding bias + slower)
-        bias_learning_rate: float = 0.02,
+        bias_learning_rate: float = 0.05,  # Faster bias learning for quicker calibration
     ):
         """
         Parameters
@@ -120,8 +120,8 @@ class PriceBlendKalmanPerps:
         self.P *= (1 - K)
 
         # Update bias estimate (learn systematic offset)
-        # Only update bias after we have some confidence in state
-        if self.rtds_observation_count > 5:
+        # Start learning bias early for faster calibration
+        if self.rtds_observation_count > 1:
             residual = z_rtds - self.x
             self.rtds_bias += self.bias_alpha * (residual - self.rtds_bias)
 
@@ -151,7 +151,8 @@ class PriceBlendKalmanPerps:
         self.P *= (1 - K)
 
         # Update bias estimate (learn funding-driven offset)
-        if self.binance_perp_observation_count > 10:
+        # Start learning early for faster calibration
+        if self.binance_perp_observation_count > 2:
             residual = z_binance_perp - self.x
             self.binance_perp_bias += self.bias_alpha * (residual - self.binance_perp_bias)
 
@@ -181,7 +182,8 @@ class PriceBlendKalmanPerps:
         self.P *= (1 - K)
 
         # Update bias estimate (learn funding-driven offset)
-        if self.kraken_perp_observation_count > 10:
+        # Start learning early for faster calibration
+        if self.kraken_perp_observation_count > 2:
             residual = z_kraken_perp - self.x
             self.kraken_perp_bias += self.bias_alpha * (residual - self.kraken_perp_bias)
 
