@@ -150,6 +150,14 @@ def process_user_data(rows):
             #print("[USER DEBUG] Skipping event with unknown token:", token)
             continue
 
+        # CRITICAL FIX: If market field is missing, look it up from token
+        # The websocket may not always include the market field
+        if market is None and token is not None:
+            market = global_state.token_to_condition_id.get(token)
+            if market is None:
+                # Can't process without market_id - position updates would fail
+                continue
+
         # ------------- ORDER EVENTS (book-keeping + maker fills) -------------
         if event_type == "order":
             order_id   = row.get("id", "")
