@@ -52,7 +52,7 @@ def update_periodically(client):
     # Open CSV file for logging
     csv_file = open("theo_comparison.csv", "w", newline="")
     csv_writer = csv.writer(csv_file)
-    csv_writer.writerow(["timestamp", "rtds_spot", "binance_spot_usd", "blended_spot", "blended_theo", "binance_theo", "fair_vol", "market_bid", "market_offer", "market_mid"])
+    csv_writer.writerow(["timestamp", "rtds_spot", "binance_spot_usd", "blended_spot", "blended_theo", "binance_theo", "fair_vol", "market_bid", "market_offer", "market_mid", "realized_vol_5m", "realized_vol_15m"])
 
     while True:
         #print(global_state.working_orders_by_market)
@@ -93,8 +93,12 @@ def update_periodically(client):
 
                 print(f"RTDS SPOT: {rtds_spot}  BINANCE SPOT: {binance_spot_usd}  BLENDED: {blended_spot}  |  BLENDED THEO: {blended_theo}  BINANCE THEO: {binance_theo}")
 
+                # Get realized vol from global state
+                realized_vol_5m = global_state.realized_vol_5m
+                realized_vol_15m = global_state.realized_vol_15m
+
                 # Write to CSV
-                csv_writer.writerow([current_time, rtds_spot, binance_spot_usd, blended_spot, blended_theo, binance_theo, fair_vol, market_bid, market_offer, market_mid])
+                csv_writer.writerow([current_time, rtds_spot, binance_spot_usd, blended_spot, blended_theo, binance_theo, fair_vol, market_bid, market_offer, market_mid, realized_vol_5m, realized_vol_15m])
                 csv_file.flush()  # Ensure data is written immediately
 
         time.sleep(0.5)
