@@ -28,8 +28,8 @@ class PriceBlendKalmanPerps:
         P0: float = 500.0**2,  # High initial uncertainty for fast calibration
         process_var_per_sec: float = 10.0**2,
         rtds_meas_var: float = 2.0**2,  # High trust in RTDS for level (same as original blend)
-        binance_perp_meas_var: float = 4.5**2,  # ~5x less trust than RTDS (funding bias, but fast)
-        kraken_perp_meas_var: float = 5.5**2,  # ~7.5x less trust (funding bias + slower)
+        binance_perp_meas_var: float = 3.5**2,  # ~5x less trust than RTDS (funding bias, but fast)
+        kraken_perp_meas_var: float = 4.0**2,  # ~7.5x less trust (funding bias + slower)
         bias_learning_rate: float = 0.05,  # Faster bias learning for quicker calibration
     ):
         """
