@@ -27,6 +27,7 @@ KRAKEN_SPOT_WS = "wss://ws.kraken.com"
 KRAKEN_FUTURES_WS = "wss://futures.kraken.com/ws/v1"  # Has index price!
 KRAKEN_USDT_API = "https://api.kraken.com/0/public/Ticker"
 POLYMARKET_RTDS_WS = "wss://ws-live-data.polymarket.com"
+BITSTAMP_WS = "wss://ws.bitstamp.net"
 
 # Polymarket RTDS subscription for BTC/USD Chainlink price
 RTDS_SUBSCRIBE_MSG = {
@@ -64,6 +65,12 @@ kraken_index_ts = None
 # Polymarket RTDS Chainlink price
 rtds_price_usd = None
 rtds_ts = None
+
+# Bitstamp BTC/USD (native USD, US-regulated)
+bitstamp_mid_usd = None
+bitstamp_bid = None
+bitstamp_ask = None
+bitstamp_ts = None
 
 usdt_usd_rate = 1.0  # Updated periodically
 
@@ -323,6 +330,63 @@ async def stream_rtds():
             backoff = min(30.0, backoff * 1.5)
 
 
+async def stream_bitstamp():
+    """Stream Bitstamp BTC/USD order book (native USD, US-regulated)."""
+    global bitstamp_mid_usd, bitstamp_bid, bitstamp_ask, bitstamp_ts
+
+    backoff = 1.0
+
+    while True:
+        try:
+            async with websockets.connect(
+                BITSTAMP_WS,
+                ping_interval=20,
+                ping_timeout=20,
+                close_timeout=5,
+            ) as ws:
+                _set_tcp_nodelay(ws)
+                backoff = 1.0
+                print("[BITSTAMP] Connected")
+
+                # Subscribe to BTC/USD order book
+                subscribe_msg = {
+                    "event": "bts:subscribe",
+                    "data": {
+                        "channel": "order_book_btcusd"
+                    }
+                }
+                await ws.send(json.dumps(subscribe_msg))
+
+                async for msg in ws:
+                    data = json.loads(msg)
+
+                    event = data.get("event")
+                    if event == "bts:subscription_succeeded":
+                        print(f"[BITSTAMP] Subscribed to {data.get('channel')}")
+                        continue
+
+                    if event == "data":
+                        book_data = data.get("data", {})
+                        bids = book_data.get("bids", [])
+                        asks = book_data.get("asks", [])
+
+                        if bids and asks:
+                            try:
+                                bitstamp_bid = float(bids[0][0])
+                                bitstamp_ask = float(asks[0][0])
+                                bitstamp_mid_usd = 0.5 * (bitstamp_bid + bitstamp_ask)
+                                bitstamp_ts = time.time()
+                            except (IndexError, ValueError, TypeError):
+                                pass
+
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            raise
+        except Exception as e:
+            print(f"[BITSTAMP] Error: {e}, reconnecting in {backoff:.1f}s")
+            await asyncio.sleep(backoff)
+            backoff = min(30.0, backoff * 1.5)
+
+
 async def sample_prices():
     """Sample prices every SAMPLE_INTERVAL seconds."""
     global samples
@@ -332,7 +396,7 @@ async def sample_prices():
     while True:
         now = time.time()
 
-        if binance_mid_usd is not None or kraken_mid_usd is not None or kraken_index_usd is not None or rtds_price_usd is not None:
+        if binance_mid_usd is not None or kraken_mid_usd is not None or kraken_index_usd is not None or rtds_price_usd is not None or bitstamp_mid_usd is not None:
             sample = {
                 "timestamp": now,
                 "datetime": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
@@ -348,6 +412,10 @@ async def sample_prices():
                 "kraken_index_age_ms": (now - kraken_index_ts) * 1000 if kraken_index_ts else None,
                 "rtds_price_usd": rtds_price_usd,
                 "rtds_age_ms": (now - rtds_ts) * 1000 if rtds_ts else None,
+                "bitstamp_mid_usd": bitstamp_mid_usd,
+                "bitstamp_bid": bitstamp_bid,
+                "bitstamp_ask": bitstamp_ask,
+                "bitstamp_age_ms": (now - bitstamp_ts) * 1000 if bitstamp_ts else None,
                 "usdt_usd_rate": usdt_usd_rate,
             }
 
@@ -366,6 +434,11 @@ async def sample_prices():
                 sample["rtds_minus_binance"] = rtds_price_usd - binance_mid_usd
             else:
                 sample["rtds_minus_binance"] = None
+
+            if binance_mid_usd is not None and bitstamp_mid_usd is not None:
+                sample["bitstamp_minus_binance"] = bitstamp_mid_usd - binance_mid_usd
+            else:
+                sample["bitstamp_minus_binance"] = None
 
             samples.append(sample)
 
@@ -388,7 +461,8 @@ async def dump_to_csv():
         "kraken_mid_usd", "kraken_bid", "kraken_ask", "kraken_spot_age_ms",
         "kraken_index_usd", "kraken_index_age_ms",
         "rtds_price_usd", "rtds_age_ms",
-        "kraken_spot_minus_binance", "kraken_index_minus_binance", "rtds_minus_binance",
+        "bitstamp_mid_usd", "bitstamp_bid", "bitstamp_ask", "bitstamp_age_ms",
+        "kraken_spot_minus_binance", "kraken_index_minus_binance", "rtds_minus_binance", "bitstamp_minus_binance",
         "usdt_usd_rate"
     ]
 
@@ -419,6 +493,7 @@ async def dump_to_csv():
             index_diffs = [s["kraken_index_minus_binance"] for s in to_write if s["kraken_index_minus_binance"] is not None]
             spot_diffs = [s["kraken_spot_minus_binance"] for s in to_write if s["kraken_spot_minus_binance"] is not None]
             rtds_diffs = [s["rtds_minus_binance"] for s in to_write if s["rtds_minus_binance"] is not None]
+            bitstamp_diffs = [s["bitstamp_minus_binance"] for s in to_write if s["bitstamp_minus_binance"] is not None]
 
             summary_parts = [f"[CSV] Wrote {len(to_write)} samples."]
 
@@ -429,6 +504,10 @@ async def dump_to_csv():
             if rtds_diffs:
                 avg_rtds = sum(rtds_diffs) / len(rtds_diffs)
                 summary_parts.append(f"RTDS: ${avg_rtds:+.2f}")
+
+            if bitstamp_diffs:
+                avg_bitstamp = sum(bitstamp_diffs) / len(bitstamp_diffs)
+                summary_parts.append(f"Bitstamp: ${avg_bitstamp:+.2f}")
 
             if spot_diffs:
                 avg_spot = sum(spot_diffs) / len(spot_diffs)
@@ -461,6 +540,12 @@ async def status_printer():
         else:
             parts.append("RTDS: --")
 
+        if bitstamp_mid_usd is not None:
+            diff = (bitstamp_mid_usd - binance_mid_usd) if binance_mid_usd else 0
+            parts.append(f"Bitstamp: ${bitstamp_mid_usd:.2f} ({diff:+.1f})")
+        else:
+            parts.append("Bitstamp: --")
+
         parts.append(f"n={len(samples)}")
 
         print(f"[STATUS] " + " | ".join(parts))
@@ -475,6 +560,7 @@ async def main():
     print("  - Kraken Spot XBT/USD (bid/ask mid)")
     print("  - Kraken Futures Index (multi-exchange aggregate)")
     print("  - Polymarket RTDS (Chainlink oracle)")
+    print("  - Bitstamp BTC/USD (native USD, US-regulated)")
     print(f"Sample interval: {SAMPLE_INTERVAL}s")
     print(f"CSV dump interval: {DUMP_INTERVAL}s")
     print("=" * 60)
@@ -486,6 +572,7 @@ async def main():
         stream_kraken_spot(),
         stream_kraken_index(),
         stream_rtds(),
+        stream_bitstamp(),
         sample_prices(),
         dump_to_csv(),
         status_printer(),

@@ -917,8 +917,8 @@ async def perform_trade(market_id: str):
     now_et = datetime.now(ZoneInfo("America/New_York"))
     minutes_to_expiry = (global_state.exp - now_et).total_seconds() / 60.0
 
-    if minutes_to_expiry < 5.0:
-        # Halve max position in final 5 minutes, round to nearest multiple of 5
+    if minutes_to_expiry < 3.0:
+        # Halve max position in final 3 minutes, round to nearest multiple of 5
         effective_max_position = round(MAX_POSITION / 2 / 5) * 5
         effective_max_position = max(5, effective_max_position)  # minimum of 5
         if VERBOSE:
