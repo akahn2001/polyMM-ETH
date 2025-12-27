@@ -14,9 +14,20 @@ import time
 import asyncio
 import statistics
 import requests
+from requests.adapters import HTTPAdapter
 import websockets
 import json
 from datetime import datetime
+
+# ============================================================
+# HTTP CONNECTION POOLING - Reuse connections for accurate test
+# ============================================================
+_session = requests.Session()
+_adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10, max_retries=0)
+_session.mount('https://', _adapter)
+_session.mount('http://', _adapter)
+requests.get = _session.get
+requests.post = _session.post
 
 # Polymarket endpoints
 CLOB_REST_API = "https://clob.polymarket.com"
