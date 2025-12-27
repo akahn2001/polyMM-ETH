@@ -23,6 +23,7 @@ import requests
 
 # Websocket URLs
 BINANCE_WS = "wss://stream.binance.com:9443/ws/btcusdt@bookTicker"
+BINANCE_PERP_WS = "wss://fstream.binance.com/ws/btcusdt@markPrice@1s"  # Mark price + funding, 1s updates
 KRAKEN_SPOT_WS = "wss://ws.kraken.com"
 KRAKEN_FUTURES_WS = "wss://futures.kraken.com/ws/v1"  # Has index price!
 KRAKEN_USDT_API = "https://api.kraken.com/0/public/Ticker"
@@ -71,6 +72,17 @@ bitstamp_mid_usd = None
 bitstamp_bid = None
 bitstamp_ask = None
 bitstamp_ts = None
+
+# Binance BTCUSDT Perpetual (futures, may lead spot)
+binance_perp_mark = None  # Mark price
+binance_perp_index = None  # Index price (spot aggregate)
+binance_perp_funding = None  # Funding rate (sentiment indicator)
+binance_perp_ts = None
+
+# Kraken PI_XBTUSD Perpetual (inverse perp, USD-settled)
+kraken_perp_mark = None  # Mark price
+kraken_perp_funding = None  # Current funding rate
+kraken_perp_ts = None
 
 usdt_usd_rate = 1.0  # Updated periodically
 
@@ -152,6 +164,49 @@ async def stream_binance():
             backoff = min(30.0, backoff * 1.5)
 
 
+async def stream_binance_perp():
+    """Stream Binance BTCUSDT Perpetual mark price and funding rate."""
+    global binance_perp_mark, binance_perp_index, binance_perp_funding, binance_perp_ts
+
+    backoff = 1.0
+
+    while True:
+        try:
+            async with websockets.connect(
+                BINANCE_PERP_WS,
+                ping_interval=20,
+                ping_timeout=20,
+                close_timeout=5,
+            ) as ws:
+                _set_tcp_nodelay(ws)
+                backoff = 1.0
+                print("[BINANCE PERP] Connected")
+
+                async for msg in ws:
+                    data = json.loads(msg)
+
+                    # markPrice stream returns:
+                    # {
+                    #   "e": "markPriceUpdate",
+                    #   "p": "98234.56",      # Mark price
+                    #   "i": "98230.12",      # Index price
+                    #   "r": "0.00010000",    # Funding rate
+                    #   "T": 1234567890000    # Next funding time
+                    # }
+                    if data.get("e") == "markPriceUpdate":
+                        binance_perp_mark = float(data["p"])
+                        binance_perp_index = float(data["i"])
+                        binance_perp_funding = float(data["r"])
+                        binance_perp_ts = time.time()
+
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            raise
+        except Exception as e:
+            print(f"[BINANCE PERP] Error: {e}, reconnecting in {backoff:.1f}s")
+            await asyncio.sleep(backoff)
+            backoff = min(30.0, backoff * 1.5)
+
+
 async def stream_kraken_spot():
     """Stream Kraken XBT/USD spot (native USD pair)."""
     global kraken_mid_usd, kraken_bid, kraken_ask, kraken_ts
@@ -209,9 +264,9 @@ async def stream_kraken_spot():
             backoff = min(30.0, backoff * 1.5)
 
 
-async def stream_kraken_index():
-    """Stream Kraken Futures index price (aggregate of multiple exchanges)."""
-    global kraken_index_usd, kraken_index_ts
+async def stream_kraken_futures():
+    """Stream Kraken Futures ticker (index price, mark price, funding rate)."""
+    global kraken_index_usd, kraken_index_ts, kraken_perp_mark, kraken_perp_funding, kraken_perp_ts
 
     backoff = 1.0
 
@@ -225,7 +280,7 @@ async def stream_kraken_index():
             ) as ws:
                 _set_tcp_nodelay(ws)
                 backoff = 1.0
-                print("[KRAKEN INDEX] Connected to Futures WS")
+                print("[KRAKEN FUTURES] Connected to Futures WS")
 
                 # Subscribe to PI_XBTUSD ticker (perpetual inverse BTC/USD)
                 subscribe_msg = {
@@ -238,28 +293,49 @@ async def stream_kraken_index():
                 async for msg in ws:
                     data = json.loads(msg)
 
-                    # Look for ticker messages with index field
+                    # Look for ticker messages
                     if isinstance(data, dict):
                         feed = data.get("feed")
-                        if feed == "ticker" and "index" in data:
-                            try:
-                                kraken_index_usd = float(data["index"])
-                                kraken_index_ts = time.time()
-                            except (ValueError, TypeError):
-                                pass
-                        elif feed == "ticker_snapshot" and "index" in data:
-                            # Initial snapshot
-                            try:
-                                kraken_index_usd = float(data["index"])
-                                kraken_index_ts = time.time()
-                                print(f"[KRAKEN INDEX] First index: ${kraken_index_usd:.2f}")
-                            except (ValueError, TypeError):
-                                pass
+                        if feed in ("ticker", "ticker_snapshot"):
+                            now = time.time()
+
+                            # Index price (aggregate of multiple exchanges)
+                            if "index" in data:
+                                try:
+                                    kraken_index_usd = float(data["index"])
+                                    kraken_index_ts = now
+                                except (ValueError, TypeError):
+                                    pass
+
+                            # Mark price
+                            if "markPrice" in data:
+                                try:
+                                    kraken_perp_mark = float(data["markPrice"])
+                                    kraken_perp_ts = now
+                                except (ValueError, TypeError):
+                                    pass
+
+                            # Funding rate (current funding rate for perps)
+                            # Field may be absent if zero
+                            if "funding_rate" in data:
+                                try:
+                                    kraken_perp_funding = float(data["funding_rate"])
+                                except (ValueError, TypeError):
+                                    pass
+                            elif "fundingRate" in data:
+                                try:
+                                    kraken_perp_funding = float(data["fundingRate"])
+                                except (ValueError, TypeError):
+                                    pass
+
+                            if feed == "ticker_snapshot" and kraken_index_usd is not None:
+                                funding_str = f", funding={kraken_perp_funding:.6f}" if kraken_perp_funding else ""
+                                print(f"[KRAKEN FUTURES] Index: ${kraken_index_usd:.2f}, Mark: ${kraken_perp_mark:.2f}{funding_str}")
 
         except (asyncio.CancelledError, KeyboardInterrupt):
             raise
         except Exception as e:
-            print(f"[KRAKEN INDEX] Error: {e}, reconnecting in {backoff:.1f}s")
+            print(f"[KRAKEN FUTURES] Error: {e}, reconnecting in {backoff:.1f}s")
             await asyncio.sleep(backoff)
             backoff = min(30.0, backoff * 1.5)
 
@@ -396,7 +472,7 @@ async def sample_prices():
     while True:
         now = time.time()
 
-        if binance_mid_usd is not None or kraken_mid_usd is not None or kraken_index_usd is not None or rtds_price_usd is not None or bitstamp_mid_usd is not None:
+        if binance_mid_usd is not None or kraken_mid_usd is not None or kraken_index_usd is not None or rtds_price_usd is not None or bitstamp_mid_usd is not None or binance_perp_mark is not None or kraken_perp_mark is not None:
             sample = {
                 "timestamp": now,
                 "datetime": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
@@ -404,12 +480,19 @@ async def sample_prices():
                 "binance_bid": binance_bid,
                 "binance_ask": binance_ask,
                 "binance_age_ms": (now - binance_ts) * 1000 if binance_ts else None,
+                "binance_perp_mark": binance_perp_mark,
+                "binance_perp_index": binance_perp_index,
+                "binance_perp_funding": binance_perp_funding,
+                "binance_perp_age_ms": (now - binance_perp_ts) * 1000 if binance_perp_ts else None,
                 "kraken_mid_usd": kraken_mid_usd,
                 "kraken_bid": kraken_bid,
                 "kraken_ask": kraken_ask,
                 "kraken_spot_age_ms": (now - kraken_ts) * 1000 if kraken_ts else None,
                 "kraken_index_usd": kraken_index_usd,
                 "kraken_index_age_ms": (now - kraken_index_ts) * 1000 if kraken_index_ts else None,
+                "kraken_perp_mark": kraken_perp_mark,
+                "kraken_perp_funding": kraken_perp_funding,
+                "kraken_perp_age_ms": (now - kraken_perp_ts) * 1000 if kraken_perp_ts else None,
                 "rtds_price_usd": rtds_price_usd,
                 "rtds_age_ms": (now - rtds_ts) * 1000 if rtds_ts else None,
                 "bitstamp_mid_usd": bitstamp_mid_usd,
@@ -440,6 +523,18 @@ async def sample_prices():
             else:
                 sample["bitstamp_minus_binance"] = None
 
+            # Perp vs Spot spread (positive = perp premium = bullish sentiment)
+            if binance_mid_usdt is not None and binance_perp_mark is not None:
+                sample["binance_perp_minus_spot"] = binance_perp_mark - binance_mid_usdt
+            else:
+                sample["binance_perp_minus_spot"] = None
+
+            # Kraken perp vs index spread
+            if kraken_index_usd is not None and kraken_perp_mark is not None:
+                sample["kraken_perp_minus_index"] = kraken_perp_mark - kraken_index_usd
+            else:
+                sample["kraken_perp_minus_index"] = None
+
             samples.append(sample)
 
         await asyncio.sleep(SAMPLE_INTERVAL)
@@ -458,11 +553,14 @@ async def dump_to_csv():
     fieldnames = [
         "datetime", "timestamp",
         "binance_mid_usd", "binance_bid", "binance_ask", "binance_age_ms",
+        "binance_perp_mark", "binance_perp_index", "binance_perp_funding", "binance_perp_age_ms",
         "kraken_mid_usd", "kraken_bid", "kraken_ask", "kraken_spot_age_ms",
         "kraken_index_usd", "kraken_index_age_ms",
+        "kraken_perp_mark", "kraken_perp_funding", "kraken_perp_age_ms",
         "rtds_price_usd", "rtds_age_ms",
         "bitstamp_mid_usd", "bitstamp_bid", "bitstamp_ask", "bitstamp_age_ms",
         "kraken_spot_minus_binance", "kraken_index_minus_binance", "rtds_minus_binance", "bitstamp_minus_binance",
+        "binance_perp_minus_spot", "kraken_perp_minus_index",
         "usdt_usd_rate"
     ]
 
@@ -494,12 +592,36 @@ async def dump_to_csv():
             spot_diffs = [s["kraken_spot_minus_binance"] for s in to_write if s["kraken_spot_minus_binance"] is not None]
             rtds_diffs = [s["rtds_minus_binance"] for s in to_write if s["rtds_minus_binance"] is not None]
             bitstamp_diffs = [s["bitstamp_minus_binance"] for s in to_write if s["bitstamp_minus_binance"] is not None]
+            binance_perp_diffs = [s["binance_perp_minus_spot"] for s in to_write if s["binance_perp_minus_spot"] is not None]
+            kraken_perp_diffs = [s["kraken_perp_minus_index"] for s in to_write if s["kraken_perp_minus_index"] is not None]
+            binance_funding_rates = [s["binance_perp_funding"] for s in to_write if s["binance_perp_funding"] is not None]
+            kraken_funding_rates = [s["kraken_perp_funding"] for s in to_write if s["kraken_perp_funding"] is not None]
 
             summary_parts = [f"[CSV] Wrote {len(to_write)} samples."]
 
+            if binance_perp_diffs:
+                avg_perp = sum(binance_perp_diffs) / len(binance_perp_diffs)
+                summary_parts.append(f"BinPerp: ${avg_perp:+.2f}")
+
+            if binance_funding_rates:
+                avg_funding = sum(binance_funding_rates) / len(binance_funding_rates)
+                # Funding rate is per 8 hours, annualize it: rate * 3 * 365 * 100%
+                annual_funding = avg_funding * 3 * 365 * 100
+                summary_parts.append(f"BinFund: {annual_funding:+.1f}%/yr")
+
+            if kraken_perp_diffs:
+                avg_perp = sum(kraken_perp_diffs) / len(kraken_perp_diffs)
+                summary_parts.append(f"KrkPerp: ${avg_perp:+.2f}")
+
+            if kraken_funding_rates:
+                avg_funding = sum(kraken_funding_rates) / len(kraken_funding_rates)
+                # Kraken funding rate is per hour, annualize it: rate * 24 * 365 * 100%
+                annual_funding = avg_funding * 24 * 365 * 100
+                summary_parts.append(f"KrkFund: {annual_funding:+.1f}%/yr")
+
             if index_diffs:
                 avg_idx = sum(index_diffs) / len(index_diffs)
-                summary_parts.append(f"KrakenIdx: ${avg_idx:+.2f}")
+                summary_parts.append(f"KrkIdx: ${avg_idx:+.2f}")
 
             if rtds_diffs:
                 avg_rtds = sum(rtds_diffs) / len(rtds_diffs)
@@ -508,10 +630,6 @@ async def dump_to_csv():
             if bitstamp_diffs:
                 avg_bitstamp = sum(bitstamp_diffs) / len(bitstamp_diffs)
                 summary_parts.append(f"Bitstamp: ${avg_bitstamp:+.2f}")
-
-            if spot_diffs:
-                avg_spot = sum(spot_diffs) / len(spot_diffs)
-                summary_parts.append(f"KrakenSpot: ${avg_spot:+.2f}")
 
             print(" | ".join(summary_parts))
 
@@ -524,9 +642,21 @@ async def status_printer():
         parts = []
 
         if binance_mid_usd is not None:
-            parts.append(f"Binance: ${binance_mid_usd:.2f}")
+            parts.append(f"BinSpot: ${binance_mid_usd:.2f}")
         else:
-            parts.append("Binance: --")
+            parts.append("BinSpot: --")
+
+        if binance_perp_mark is not None and binance_mid_usdt is not None:
+            basis = binance_perp_mark - binance_mid_usdt
+            parts.append(f"BinPerp: {basis:+.1f}")
+        else:
+            parts.append("BinPerp: --")
+
+        if kraken_perp_mark is not None and kraken_index_usd is not None:
+            basis = kraken_perp_mark - kraken_index_usd
+            parts.append(f"KrkPerp: {basis:+.1f}")
+        else:
+            parts.append("KrkPerp: --")
 
         if kraken_index_usd is not None:
             diff = (kraken_index_usd - binance_mid_usd) if binance_mid_usd else 0
@@ -556,9 +686,10 @@ async def status_printer():
 async def main():
     print("=" * 60)
     print("BTC/USD Price Feed Comparison")
-    print("  - Binance BTCUSDT (converted to USD)")
+    print("  - Binance BTCUSDT Spot (converted to USD)")
+    print("  - Binance BTCUSDT Perp (mark price + funding rate)")
     print("  - Kraken Spot XBT/USD (bid/ask mid)")
-    print("  - Kraken Futures Index (multi-exchange aggregate)")
+    print("  - Kraken Futures PI_XBTUSD (index, mark price + funding rate)")
     print("  - Polymarket RTDS (Chainlink oracle)")
     print("  - Bitstamp BTC/USD (native USD, US-regulated)")
     print(f"Sample interval: {SAMPLE_INTERVAL}s")
@@ -569,8 +700,9 @@ async def main():
     await asyncio.gather(
         update_usdt_usd_rate(),
         stream_binance(),
+        stream_binance_perp(),
         stream_kraken_spot(),
-        stream_kraken_index(),
+        stream_kraken_futures(),
         stream_rtds(),
         stream_bitstamp(),
         sample_prices(),
