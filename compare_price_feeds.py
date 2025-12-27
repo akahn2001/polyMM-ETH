@@ -21,6 +21,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import websockets
 import requests
+from price_blend_kalman import PriceBlendKalman
+from price_blend_kalman_perps import PriceBlendKalmanPerps
 
 # Websocket URLs
 BINANCE_WS = "wss://stream.binance.com:9443/ws/btcusdt@bookTicker"
@@ -88,6 +90,16 @@ kraken_perp_ts = None
 
 usdt_usd_rate = 1.0  # Updated periodically
 
+# Kalman filter for blended price (Binance spot + RTDS)
+kalman_filter = None  # Initialized after first price received
+blended_price = None
+blended_ts = None
+
+# Kalman filter for perp blend (RTDS + Binance perp + Kraken perp)
+kalman_perp_filter = None  # Initialized after first price received
+blended_perp_price = None
+blended_perp_ts = None
+
 # Price samples buffer
 samples = []
 
@@ -134,6 +146,7 @@ async def update_usdt_usd_rate():
 async def stream_binance():
     """Stream Binance BTCUSDT and convert to USD."""
     global binance_mid_usdt, binance_mid_usd, binance_bid, binance_ask, binance_ts
+    global kalman_filter, blended_price, blended_ts
 
     backoff = 1.0
 
@@ -158,6 +171,14 @@ async def stream_binance():
                     binance_mid_usd = binance_mid_usdt * usdt_usd_rate
                     binance_ts = time.time()
 
+                    # Update Kalman filter with Binance price
+                    if kalman_filter is None:
+                        # Initialize filter with first Binance price
+                        kalman_filter = PriceBlendKalman(x0=binance_mid_usd)
+                    kalman_filter.update_binance(binance_mid_usd)
+                    blended_price = kalman_filter.x
+                    blended_ts = time.time()
+
         except (asyncio.CancelledError, KeyboardInterrupt):
             raise
         except Exception as e:
@@ -169,6 +190,7 @@ async def stream_binance():
 async def stream_binance_perp():
     """Stream Binance BTCUSDT Perpetual order book best bid/ask."""
     global binance_perp_mid, binance_perp_bid, binance_perp_ask, binance_perp_ts
+    global kalman_perp_filter, blended_perp_price, blended_perp_ts
 
     backoff = 1.0
 
@@ -196,10 +218,18 @@ async def stream_binance_perp():
                     #   "a": "98235.67",    # best ask price
                     #   "A": "3.456"        # best ask qty
                     # }
-                    binance_perp_bid = float(data["b"])
-                    binance_perp_ask = float(data["a"])
+                    binance_perp_bid = float(data["b"]) * usdt_usd_rate
+                    binance_perp_ask = float(data["a"]) * usdt_usd_rate
                     binance_perp_mid = 0.5 * (binance_perp_bid + binance_perp_ask)
                     binance_perp_ts = time.time()
+
+                    # Update perp Kalman filter with Binance perp price
+                    if kalman_perp_filter is None:
+                        # Initialize filter with first Binance perp price
+                        kalman_perp_filter = PriceBlendKalmanPerps(x0=binance_perp_mid)
+                    kalman_perp_filter.update_binance_perp(binance_perp_mid)
+                    blended_perp_price = kalman_perp_filter.x
+                    blended_perp_ts = time.time()
 
         except (asyncio.CancelledError, KeyboardInterrupt):
             raise
@@ -269,6 +299,7 @@ async def stream_kraken_spot():
 async def stream_kraken_futures():
     """Stream Kraken Futures order book (index price and best bid/ask)."""
     global kraken_index_usd, kraken_index_ts, kraken_perp_mid, kraken_perp_bid, kraken_perp_ask, kraken_perp_ts
+    global kalman_perp_filter, blended_perp_price, blended_perp_ts
 
     backoff = 1.0
 
@@ -330,6 +361,12 @@ async def stream_kraken_futures():
                                     kraken_perp_ask = float(data["ask"])
                                     kraken_perp_mid = 0.5 * (kraken_perp_bid + kraken_perp_ask)
                                     kraken_perp_ts = now
+
+                                    # Update perp Kalman filter with Kraken perp price
+                                    if kalman_perp_filter is not None:
+                                        kalman_perp_filter.update_kraken_perp(kraken_perp_mid)
+                                        blended_perp_price = kalman_perp_filter.x
+                                        blended_perp_ts = time.time()
                                 except (ValueError, TypeError):
                                     pass
 
@@ -350,6 +387,12 @@ async def stream_kraken_futures():
 
                                     kraken_perp_mid = 0.5 * (kraken_perp_bid + kraken_perp_ask)
                                     kraken_perp_ts = now
+
+                                    # Update perp Kalman filter with Kraken perp price
+                                    if kalman_perp_filter is not None:
+                                        kalman_perp_filter.update_kraken_perp(kraken_perp_mid)
+                                        blended_perp_price = kalman_perp_filter.x
+                                        blended_perp_ts = time.time()
                                 except (IndexError, ValueError, TypeError, KeyError):
                                     pass
 
@@ -377,6 +420,8 @@ async def rtds_ping_loop(ws):
 async def stream_rtds():
     """Stream Polymarket RTDS Chainlink BTC/USD price."""
     global rtds_price_usd, rtds_ts
+    global kalman_filter, blended_price, blended_ts
+    global kalman_perp_filter, blended_perp_price, blended_perp_ts
 
     backoff = 1.0
 
@@ -406,6 +451,18 @@ async def stream_rtds():
                             price = data["payload"]["data"][0]["value"]
                             rtds_price_usd = float(price)
                             rtds_ts = time.time()
+
+                            # Update Kalman filter with RTDS price (Binance spot + RTDS)
+                            if kalman_filter is not None:
+                                kalman_filter.update_rtds(rtds_price_usd)
+                                blended_price = kalman_filter.x
+                                blended_ts = time.time()
+
+                            # Update perp Kalman filter with RTDS price (RTDS + perps)
+                            if kalman_perp_filter is not None:
+                                kalman_perp_filter.update_rtds(rtds_price_usd)
+                                blended_perp_price = kalman_perp_filter.x
+                                blended_perp_ts = time.time()
                             continue
                         except (KeyError, IndexError, TypeError):
                             pass
@@ -415,6 +472,18 @@ async def stream_rtds():
                             price = data["payload"]["value"]
                             rtds_price_usd = float(price)
                             rtds_ts = time.time()
+
+                            # Update Kalman filter with RTDS price (Binance spot + RTDS)
+                            if kalman_filter is not None:
+                                kalman_filter.update_rtds(rtds_price_usd)
+                                blended_price = kalman_filter.x
+                                blended_ts = time.time()
+
+                            # Update perp Kalman filter with RTDS price (RTDS + perps)
+                            if kalman_perp_filter is not None:
+                                kalman_perp_filter.update_rtds(rtds_price_usd)
+                                blended_perp_price = kalman_perp_filter.x
+                                blended_perp_ts = time.time()
                         except (KeyError, TypeError):
                             pass
 
@@ -520,6 +589,10 @@ async def sample_prices():
                 "kraken_perp_age_ms": (now - kraken_perp_ts) * 1000 if kraken_perp_ts else None,
                 "rtds_price_usd": rtds_price_usd,
                 "rtds_age_ms": (now - rtds_ts) * 1000 if rtds_ts else None,
+                "blended_price_usd": blended_price,
+                "blended_age_ms": (now - blended_ts) * 1000 if blended_ts else None,
+                "blended_perp_price_usd": blended_perp_price,
+                "blended_perp_age_ms": (now - blended_perp_ts) * 1000 if blended_perp_ts else None,
                 "bitstamp_mid_usd": bitstamp_mid_usd,
                 "bitstamp_bid": bitstamp_bid,
                 "bitstamp_ask": bitstamp_ask,
@@ -548,9 +621,20 @@ async def sample_prices():
             else:
                 sample["bitstamp_minus_binance"] = None
 
+            if binance_mid_usd is not None and blended_price is not None:
+                sample["blended_minus_binance"] = blended_price - binance_mid_usd
+            else:
+                sample["blended_minus_binance"] = None
+
+            if binance_mid_usd is not None and blended_perp_price is not None:
+                sample["blended_perp_minus_binance"] = blended_perp_price - binance_mid_usd
+            else:
+                sample["blended_perp_minus_binance"] = None
+
             # Perp vs Spot spread (positive = perp premium = bullish sentiment)
-            if binance_mid_usdt is not None and binance_perp_mid is not None:
-                sample["binance_perp_minus_spot"] = binance_perp_mid - binance_mid_usdt
+            # Both converted to USD for consistency
+            if binance_mid_usd is not None and binance_perp_mid is not None:
+                sample["binance_perp_minus_spot"] = binance_perp_mid - binance_mid_usd
             else:
                 sample["binance_perp_minus_spot"] = None
 
@@ -583,8 +667,10 @@ async def dump_to_csv():
         "kraken_index_usd", "kraken_index_age_ms",
         "kraken_perp_mid", "kraken_perp_bid", "kraken_perp_ask", "kraken_perp_age_ms",
         "rtds_price_usd", "rtds_age_ms",
+        "blended_price_usd", "blended_age_ms",
+        "blended_perp_price_usd", "blended_perp_age_ms",
         "bitstamp_mid_usd", "bitstamp_bid", "bitstamp_ask", "bitstamp_age_ms",
-        "kraken_spot_minus_binance", "kraken_index_minus_binance", "rtds_minus_binance", "bitstamp_minus_binance",
+        "kraken_spot_minus_binance", "kraken_index_minus_binance", "rtds_minus_binance", "blended_minus_binance", "blended_perp_minus_binance", "bitstamp_minus_binance",
         "binance_perp_minus_spot", "kraken_perp_minus_index",
         "usdt_usd_rate"
     ]
@@ -616,6 +702,8 @@ async def dump_to_csv():
             index_diffs = [s["kraken_index_minus_binance"] for s in to_write if s["kraken_index_minus_binance"] is not None]
             spot_diffs = [s["kraken_spot_minus_binance"] for s in to_write if s["kraken_spot_minus_binance"] is not None]
             rtds_diffs = [s["rtds_minus_binance"] for s in to_write if s["rtds_minus_binance"] is not None]
+            blended_diffs = [s["blended_minus_binance"] for s in to_write if s["blended_minus_binance"] is not None]
+            blended_perp_diffs = [s["blended_perp_minus_binance"] for s in to_write if s["blended_perp_minus_binance"] is not None]
             bitstamp_diffs = [s["bitstamp_minus_binance"] for s in to_write if s["bitstamp_minus_binance"] is not None]
             binance_perp_diffs = [s["binance_perp_minus_spot"] for s in to_write if s["binance_perp_minus_spot"] is not None]
             kraken_perp_diffs = [s["kraken_perp_minus_index"] for s in to_write if s["kraken_perp_minus_index"] is not None]
@@ -638,6 +726,14 @@ async def dump_to_csv():
                 avg_rtds = sum(rtds_diffs) / len(rtds_diffs)
                 summary_parts.append(f"RTDS: ${avg_rtds:+.2f}")
 
+            if blended_diffs:
+                avg_blended = sum(blended_diffs) / len(blended_diffs)
+                summary_parts.append(f"Blended: ${avg_blended:+.2f}")
+
+            if blended_perp_diffs:
+                avg_blended_perp = sum(blended_perp_diffs) / len(blended_perp_diffs)
+                summary_parts.append(f"BlendPerp: ${avg_blended_perp:+.2f}")
+
             if bitstamp_diffs:
                 avg_bitstamp = sum(bitstamp_diffs) / len(bitstamp_diffs)
                 summary_parts.append(f"Bitstamp: ${avg_bitstamp:+.2f}")
@@ -657,8 +753,8 @@ async def status_printer():
         else:
             parts.append("BinSpot: --")
 
-        if binance_perp_mid is not None and binance_mid_usdt is not None:
-            basis = binance_perp_mid - binance_mid_usdt
+        if binance_perp_mid is not None and binance_mid_usd is not None:
+            basis = binance_perp_mid - binance_mid_usd
             parts.append(f"BinPerp: {basis:+.1f}")
         else:
             parts.append("BinPerp: --")
@@ -681,6 +777,18 @@ async def status_printer():
         else:
             parts.append("RTDS: --")
 
+        if blended_price is not None:
+            diff = (blended_price - binance_mid_usd) if binance_mid_usd else 0
+            parts.append(f"Blended: ${blended_price:.2f} ({diff:+.1f})")
+        else:
+            parts.append("Blended: --")
+
+        if blended_perp_price is not None:
+            diff = (blended_perp_price - binance_mid_usd) if binance_mid_usd else 0
+            parts.append(f"BlendPerp: ${blended_perp_price:.2f} ({diff:+.1f})")
+        else:
+            parts.append("BlendPerp: --")
+
         if bitstamp_mid_usd is not None:
             diff = (bitstamp_mid_usd - binance_mid_usd) if binance_mid_usd else 0
             parts.append(f"Bitstamp: ${bitstamp_mid_usd:.2f} ({diff:+.1f})")
@@ -702,6 +810,8 @@ async def main():
     print("  - Kraken Spot XBT/USD (bid/ask mid)")
     print("  - Kraken Futures PI_XBTUSD (index, perp order book mid)")
     print("  - Polymarket RTDS (Chainlink oracle)")
+    print("  - Blended Price (Kalman: Binance spot + RTDS)")
+    print("  - Blended Perp Price (Kalman: RTDS + Binance perp + Kraken perp)")
     print("  - Bitstamp BTC/USD (native USD, US-regulated)")
     print(f"Sample interval: {SAMPLE_INTERVAL}s")
     print(f"CSV dump interval: {DUMP_INTERVAL}s")
