@@ -27,8 +27,8 @@ class PriceBlendKalman:
         P0: float = 100.0**2,
         process_var_per_sec: float = 10.0**2,
         rtds_meas_var: float = 2.0**2,
-        binance_meas_var: float = 3.8**2,  # 3x trust in RTDS vs Binance (was 6x with 5.0**2)
-        bias_learning_rate: float = 0.02, # was .01
+        binance_meas_var: float = 5.0**2,  # 3x trust in RTDS vs Binance (was 6x with 5.0**2)
+        bias_learning_rate: float = 0.01, # was .01
     ):
         """
         Parameters
@@ -64,6 +64,7 @@ class PriceBlendKalman:
         self.bias_alpha = bias_learning_rate  # EMA smoothing factor (steady-state)
         self.bias_alpha_warmup = 0.25  # Fast learning during first 10 seconds
         self.warmup_duration = 10.0  # seconds
+        self.warmup_complete = False  # Track if we've logged the transition
 
         # Track observations for bias estimation
         self.rtds_observation_count = 0
@@ -122,6 +123,10 @@ class PriceBlendKalman:
             # Adaptive learning rate: fast for first 10 seconds, then steady-state
             elapsed = current_time - self.init_time
             alpha = self.bias_alpha_warmup if elapsed < self.warmup_duration else self.bias_alpha
+
+            # Debug: Log transition from warmup to steady-state (only once)
+            if elapsed >= self.warmup_duration and self.rtds_observation_count == 11:
+                print(f"[KALMAN] RTDS bias learning switched from warmup ({self.bias_alpha_warmup}) to steady-state ({self.bias_alpha}) at {elapsed:.1f}s")
 
             # Only update bias after filter has settled
             residual = z_rtds - self.x
