@@ -102,6 +102,11 @@ kalman_filter = None  # Initialized after first price received
 blended_price = None
 blended_ts = None
 
+# Kalman filter for blended price (Coinbase spot + RTDS)
+kalman_filter_coinbase = None  # Initialized after first price received
+blended_price_coinbase = None
+blended_ts_coinbase = None
+
 # Kalman filter for perp blend (RTDS + Binance perp + Kraken perp)
 kalman_perp_filter = None  # Initialized after first price received
 blended_perp_price = None
@@ -443,6 +448,7 @@ async def stream_rtds():
     """Stream Polymarket RTDS Chainlink BTC/USD price."""
     global rtds_price_usd, rtds_ts
     global kalman_filter, blended_price, blended_ts
+    global kalman_filter_coinbase, blended_price_coinbase, blended_ts_coinbase
     global kalman_perp_filter, blended_perp_price, blended_perp_ts
 
     backoff = 1.0
@@ -480,6 +486,12 @@ async def stream_rtds():
                                 blended_price = kalman_filter.x
                                 blended_ts = time.time()
 
+                            # Update Coinbase Kalman filter with RTDS price (Coinbase spot + RTDS)
+                            if kalman_filter_coinbase is not None:
+                                kalman_filter_coinbase.update_rtds(rtds_price_usd)
+                                blended_price_coinbase = kalman_filter_coinbase.x
+                                blended_ts_coinbase = time.time()
+
                             # Initialize or update perp Kalman filter with RTDS price (RTDS + perps)
                             if kalman_perp_filter is None:
                                 # Initialize filter with first RTDS price as state, and Binance funding premium as bias
@@ -510,6 +522,12 @@ async def stream_rtds():
                                 kalman_filter.update_rtds(rtds_price_usd)
                                 blended_price = kalman_filter.x
                                 blended_ts = time.time()
+
+                            # Update Coinbase Kalman filter with RTDS price (Coinbase spot + RTDS)
+                            if kalman_filter_coinbase is not None:
+                                kalman_filter_coinbase.update_rtds(rtds_price_usd)
+                                blended_price_coinbase = kalman_filter_coinbase.x
+                                blended_ts_coinbase = time.time()
 
                             # Initialize or update perp Kalman filter with RTDS price (RTDS + perps)
                             if kalman_perp_filter is None:
@@ -601,6 +619,7 @@ async def stream_bitstamp():
 async def stream_coinbase():
     """Stream Coinbase BTC/USD order book (native USD, US-regulated)."""
     global coinbase_mid_usd, coinbase_bid, coinbase_ask, coinbase_ts
+    global kalman_filter_coinbase, blended_price_coinbase, blended_ts_coinbase
 
     backoff = 1.0
 
@@ -640,6 +659,14 @@ async def stream_coinbase():
                             if coinbase_bid > 0 and coinbase_ask > 0:
                                 coinbase_mid_usd = 0.5 * (coinbase_bid + coinbase_ask)
                                 coinbase_ts = time.time()
+
+                                # Update Kalman filter with Coinbase price
+                                if kalman_filter_coinbase is None:
+                                    # Initialize filter with first Coinbase price
+                                    kalman_filter_coinbase = PriceBlendKalman(x0=coinbase_mid_usd)
+                                kalman_filter_coinbase.update_binance(coinbase_mid_usd)
+                                blended_price_coinbase = kalman_filter_coinbase.x
+                                blended_ts_coinbase = time.time()
                         except (ValueError, TypeError):
                             pass
 
@@ -686,6 +713,8 @@ async def sample_prices():
                 "rtds_age_ms": (now - rtds_ts) * 1000 if rtds_ts else None,
                 "blended_price_usd": blended_price,
                 "blended_age_ms": (now - blended_ts) * 1000 if blended_ts else None,
+                "blended_price_coinbase_usd": blended_price_coinbase,
+                "blended_coinbase_age_ms": (now - blended_ts_coinbase) * 1000 if blended_ts_coinbase else None,
                 "blended_perp_price_usd": blended_perp_price,
                 "blended_perp_age_ms": (now - blended_perp_ts) * 1000 if blended_perp_ts else None,
                 "bitstamp_mid_usd": bitstamp_mid_usd,
@@ -730,6 +759,11 @@ async def sample_prices():
             else:
                 sample["blended_minus_binance"] = None
 
+            if binance_mid_usd is not None and blended_price_coinbase is not None:
+                sample["blended_coinbase_minus_binance"] = blended_price_coinbase - binance_mid_usd
+            else:
+                sample["blended_coinbase_minus_binance"] = None
+
             if binance_mid_usd is not None and blended_perp_price is not None:
                 sample["blended_perp_minus_binance"] = blended_perp_price - binance_mid_usd
             else:
@@ -772,10 +806,11 @@ async def dump_to_csv():
         "kraken_perp_mid", "kraken_perp_bid", "kraken_perp_ask", "kraken_perp_age_ms",
         "rtds_price_usd", "rtds_age_ms",
         "blended_price_usd", "blended_age_ms",
+        "blended_price_coinbase_usd", "blended_coinbase_age_ms",
         "blended_perp_price_usd", "blended_perp_age_ms",
         "bitstamp_mid_usd", "bitstamp_bid", "bitstamp_ask", "bitstamp_age_ms",
         "coinbase_mid_usd", "coinbase_bid", "coinbase_ask", "coinbase_age_ms",
-        "kraken_spot_minus_binance", "kraken_index_minus_binance", "rtds_minus_binance", "blended_minus_binance", "blended_perp_minus_binance", "bitstamp_minus_binance", "coinbase_minus_binance",
+        "kraken_spot_minus_binance", "kraken_index_minus_binance", "rtds_minus_binance", "blended_minus_binance", "blended_coinbase_minus_binance", "blended_perp_minus_binance", "bitstamp_minus_binance", "coinbase_minus_binance",
         "binance_perp_minus_spot", "kraken_perp_minus_index",
         "usdt_usd_rate"
     ]
@@ -808,6 +843,7 @@ async def dump_to_csv():
             spot_diffs = [s["kraken_spot_minus_binance"] for s in to_write if s["kraken_spot_minus_binance"] is not None]
             rtds_diffs = [s["rtds_minus_binance"] for s in to_write if s["rtds_minus_binance"] is not None]
             blended_diffs = [s["blended_minus_binance"] for s in to_write if s["blended_minus_binance"] is not None]
+            blended_coinbase_diffs = [s["blended_coinbase_minus_binance"] for s in to_write if s["blended_coinbase_minus_binance"] is not None]
             blended_perp_diffs = [s["blended_perp_minus_binance"] for s in to_write if s["blended_perp_minus_binance"] is not None]
             bitstamp_diffs = [s["bitstamp_minus_binance"] for s in to_write if s["bitstamp_minus_binance"] is not None]
             coinbase_diffs = [s["coinbase_minus_binance"] for s in to_write if s["coinbase_minus_binance"] is not None]
@@ -835,6 +871,10 @@ async def dump_to_csv():
             if blended_diffs:
                 avg_blended = sum(blended_diffs) / len(blended_diffs)
                 summary_parts.append(f"Blended: ${avg_blended:+.2f}")
+
+            if blended_coinbase_diffs:
+                avg_blended_coinbase = sum(blended_coinbase_diffs) / len(blended_coinbase_diffs)
+                summary_parts.append(f"BlendCoinbase: ${avg_blended_coinbase:+.2f}")
 
             if blended_perp_diffs:
                 avg_blended_perp = sum(blended_perp_diffs) / len(blended_perp_diffs)
@@ -896,6 +936,12 @@ async def status_printer():
         else:
             parts.append("Blended: --")
 
+        if blended_price_coinbase is not None:
+            diff = (blended_price_coinbase - binance_mid_usd) if binance_mid_usd else 0
+            parts.append(f"BlendCoinbase: ${blended_price_coinbase:.2f} ({diff:+.1f})")
+        else:
+            parts.append("BlendCoinbase: --")
+
         if blended_perp_price is not None:
             diff = (blended_perp_price - binance_mid_usd) if binance_mid_usd else 0
             parts.append(f"BlendPerp: ${blended_perp_price:.2f} ({diff:+.1f})")
@@ -935,6 +981,7 @@ async def main():
     print("  - Kraken Futures PI_XBTUSD (index, perp order book mid)")
     print("  - Polymarket RTDS (Chainlink oracle)")
     print("  - Blended Price (Kalman: Binance spot + RTDS)")
+    print("  - Blended Coinbase Price (Kalman: Coinbase spot + RTDS)")
     print("  - Blended Perp Price (Kalman: RTDS + Binance perp + Kraken perp)")
     print("  - Bitstamp BTC/USD (native USD, US-regulated)")
     print("  - Coinbase BTC-USD (native USD, US-regulated)")
