@@ -276,7 +276,7 @@ MIN_TICKS_REDUCE = 1.0   # ticks from touch when reducing position (want to get 
 MIN_EDGE_TO_QUOTE = 0.02  # minimum edge (in price points) required to quote a side
 
 MIN_ORDER_INTERVAL = .50  # seconds → max 5 orders/sec per market+side, # changed this back to 1
-POST_FILL_COOLDOWN = 1.0  # seconds to pause quoting on a side after getting filled (GTC only)
+POST_FILL_COOLDOWN = 2.0  # seconds to pause quoting on a side after getting filled (GTC only)
 
 # Binance momentum adjustment
 USE_BINANCE_MOMENTUM = False  # Toggle to use Binance momentum for predictive quoting
@@ -285,14 +285,14 @@ MAX_MOMENTUM_ADJUSTMENT = 0.03  # Max price adjustment from momentum (caps at 3 
 
 # Dynamic spread based on option price sensitivity
 OPTION_MOVE_LOOKBACK = 0.5        # Seconds to look back for BTC move
-OPTION_MOVE_THRESHOLD = 0.02      # 2 cents - start widening when option moved this much (was 0.01)
-OPTION_MOVE_SPREAD_SCALE = 0.3    # spread multiplier per cent above threshold (was 0.5)
-MAX_OPTION_SPREAD_MULT = 2.5      # Max spread multiplier cap (was 4.0)
+OPTION_MOVE_THRESHOLD = 0.01      # 2 cents - start widening when option moved this much (was 0.01)
+OPTION_MOVE_SPREAD_SCALE = 0.5    # spread multiplier per cent above threshold (was 0.5)
+MAX_OPTION_SPREAD_MULT = 4.0      # Max spread multiplier cap (was 4.0)
 
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = 0.015   # max fair value nudge (1 cent)
+MAX_IMBALANCE_ADJUSTMENT = 0.02   # max fair value nudge (1 cent)
 
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .50  # .5 cent option move triggers immediate cancel # TODO: jitter may throw this off

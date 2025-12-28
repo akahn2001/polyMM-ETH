@@ -32,6 +32,7 @@ KRAKEN_FUTURES_WS = "wss://futures.kraken.com/ws/v1"  # Has index price!
 KRAKEN_USDT_API = "https://api.kraken.com/0/public/Ticker"
 POLYMARKET_RTDS_WS = "wss://ws-live-data.polymarket.com"
 BITSTAMP_WS = "wss://ws.bitstamp.net"
+COINBASE_WS = "wss://ws-feed.exchange.coinbase.com"
 
 # Polymarket RTDS subscription for BTC/USD Chainlink price
 RTDS_SUBSCRIBE_MSG = {
@@ -75,6 +76,12 @@ bitstamp_mid_usd = None
 bitstamp_bid = None
 bitstamp_ask = None
 bitstamp_ts = None
+
+# Coinbase BTC/USD (native USD, US-regulated)
+coinbase_mid_usd = None
+coinbase_bid = None
+coinbase_ask = None
+coinbase_ts = None
 
 # Binance BTCUSDT Perpetual (futures, may lead spot)
 binance_perp_mid = None  # Order book mid (bid+ask)/2
@@ -591,6 +598,59 @@ async def stream_bitstamp():
             backoff = min(30.0, backoff * 1.5)
 
 
+async def stream_coinbase():
+    """Stream Coinbase BTC/USD order book (native USD, US-regulated)."""
+    global coinbase_mid_usd, coinbase_bid, coinbase_ask, coinbase_ts
+
+    backoff = 1.0
+
+    while True:
+        try:
+            async with websockets.connect(
+                COINBASE_WS,
+                ping_interval=20,
+                ping_timeout=20,
+                close_timeout=5,
+            ) as ws:
+                _set_tcp_nodelay(ws)
+                backoff = 1.0
+                print("[COINBASE] Connected")
+
+                # Subscribe to BTC-USD ticker (level2 provides best bid/ask)
+                subscribe_msg = {
+                    "type": "subscribe",
+                    "product_ids": ["BTC-USD"],
+                    "channels": ["ticker"]
+                }
+                await ws.send(json.dumps(subscribe_msg))
+
+                async for msg in ws:
+                    data = json.loads(msg)
+
+                    msg_type = data.get("type")
+                    if msg_type == "subscriptions":
+                        print(f"[COINBASE] Subscribed to {data.get('channels')}")
+                        continue
+
+                    if msg_type == "ticker":
+                        # Ticker updates include best_bid and best_ask
+                        try:
+                            coinbase_bid = float(data.get("best_bid", 0))
+                            coinbase_ask = float(data.get("best_ask", 0))
+                            if coinbase_bid > 0 and coinbase_ask > 0:
+                                coinbase_mid_usd = 0.5 * (coinbase_bid + coinbase_ask)
+                                coinbase_ts = time.time()
+                        except (ValueError, TypeError):
+                            pass
+
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            raise
+        except Exception as e:
+            print(f"[COINBASE] Error: {e}, reconnecting in {backoff:.1f}s")
+            await asyncio.sleep(backoff)
+            backoff = min(30.0, backoff * 1.5)
+
+
 async def sample_prices():
     """Sample prices every SAMPLE_INTERVAL seconds."""
     global samples
@@ -600,7 +660,7 @@ async def sample_prices():
     while True:
         now = time.time()
 
-        if binance_mid_usd is not None or kraken_mid_usd is not None or kraken_index_usd is not None or rtds_price_usd is not None or bitstamp_mid_usd is not None or binance_perp_mid is not None or kraken_perp_mid is not None:
+        if binance_mid_usd is not None or kraken_mid_usd is not None or kraken_index_usd is not None or rtds_price_usd is not None or bitstamp_mid_usd is not None or coinbase_mid_usd is not None or binance_perp_mid is not None or kraken_perp_mid is not None:
             sample = {
                 "timestamp": now,
                 "datetime": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
@@ -632,6 +692,10 @@ async def sample_prices():
                 "bitstamp_bid": bitstamp_bid,
                 "bitstamp_ask": bitstamp_ask,
                 "bitstamp_age_ms": (now - bitstamp_ts) * 1000 if bitstamp_ts else None,
+                "coinbase_mid_usd": coinbase_mid_usd,
+                "coinbase_bid": coinbase_bid,
+                "coinbase_ask": coinbase_ask,
+                "coinbase_age_ms": (now - coinbase_ts) * 1000 if coinbase_ts else None,
                 "usdt_usd_rate": usdt_usd_rate,
             }
 
@@ -655,6 +719,11 @@ async def sample_prices():
                 sample["bitstamp_minus_binance"] = bitstamp_mid_usd - binance_mid_usd
             else:
                 sample["bitstamp_minus_binance"] = None
+
+            if binance_mid_usd is not None and coinbase_mid_usd is not None:
+                sample["coinbase_minus_binance"] = coinbase_mid_usd - binance_mid_usd
+            else:
+                sample["coinbase_minus_binance"] = None
 
             if binance_mid_usd is not None and blended_price is not None:
                 sample["blended_minus_binance"] = blended_price - binance_mid_usd
@@ -705,7 +774,8 @@ async def dump_to_csv():
         "blended_price_usd", "blended_age_ms",
         "blended_perp_price_usd", "blended_perp_age_ms",
         "bitstamp_mid_usd", "bitstamp_bid", "bitstamp_ask", "bitstamp_age_ms",
-        "kraken_spot_minus_binance", "kraken_index_minus_binance", "rtds_minus_binance", "blended_minus_binance", "blended_perp_minus_binance", "bitstamp_minus_binance",
+        "coinbase_mid_usd", "coinbase_bid", "coinbase_ask", "coinbase_age_ms",
+        "kraken_spot_minus_binance", "kraken_index_minus_binance", "rtds_minus_binance", "blended_minus_binance", "blended_perp_minus_binance", "bitstamp_minus_binance", "coinbase_minus_binance",
         "binance_perp_minus_spot", "kraken_perp_minus_index",
         "usdt_usd_rate"
     ]
@@ -740,6 +810,7 @@ async def dump_to_csv():
             blended_diffs = [s["blended_minus_binance"] for s in to_write if s["blended_minus_binance"] is not None]
             blended_perp_diffs = [s["blended_perp_minus_binance"] for s in to_write if s["blended_perp_minus_binance"] is not None]
             bitstamp_diffs = [s["bitstamp_minus_binance"] for s in to_write if s["bitstamp_minus_binance"] is not None]
+            coinbase_diffs = [s["coinbase_minus_binance"] for s in to_write if s["coinbase_minus_binance"] is not None]
             binance_perp_diffs = [s["binance_perp_minus_spot"] for s in to_write if s["binance_perp_minus_spot"] is not None]
             kraken_perp_diffs = [s["kraken_perp_minus_index"] for s in to_write if s["kraken_perp_minus_index"] is not None]
 
@@ -772,6 +843,10 @@ async def dump_to_csv():
             if bitstamp_diffs:
                 avg_bitstamp = sum(bitstamp_diffs) / len(bitstamp_diffs)
                 summary_parts.append(f"Bitstamp: ${avg_bitstamp:+.2f}")
+
+            if coinbase_diffs:
+                avg_coinbase = sum(coinbase_diffs) / len(coinbase_diffs)
+                summary_parts.append(f"Coinbase: ${avg_coinbase:+.2f}")
 
             print(" | ".join(summary_parts))
 
@@ -833,6 +908,12 @@ async def status_printer():
         else:
             parts.append("Bitstamp: --")
 
+        if coinbase_mid_usd is not None:
+            diff = (coinbase_mid_usd - binance_mid_usd) if binance_mid_usd else 0
+            parts.append(f"Coinbase: ${coinbase_mid_usd:.2f} ({diff:+.1f})")
+        else:
+            parts.append("Coinbase: --")
+
         parts.append(f"n={len(samples)}")
 
         print(f"[STATUS] " + " | ".join(parts))
@@ -856,6 +937,7 @@ async def main():
     print("  - Blended Price (Kalman: Binance spot + RTDS)")
     print("  - Blended Perp Price (Kalman: RTDS + Binance perp + Kraken perp)")
     print("  - Bitstamp BTC/USD (native USD, US-regulated)")
+    print("  - Coinbase BTC-USD (native USD, US-regulated)")
     print(f"Sample interval: {SAMPLE_INTERVAL}s")
     print(f"CSV dump interval: {DUMP_INTERVAL}s")
     print("=" * 60)
@@ -869,6 +951,7 @@ async def main():
         stream_kraken_futures(),
         stream_rtds(),
         stream_bitstamp(),
+        stream_coinbase(),
         sample_prices(),
         dump_to_csv(),
         status_printer(),
