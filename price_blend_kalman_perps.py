@@ -28,7 +28,7 @@ class PriceBlendKalmanPerps:
         process_var_per_sec: float = 10.0**2,
         rtds_meas_var: float = 2.0**2,  # Same as spot/RTDS blend
         binance_perp_meas_var: float = 3.5**2,  # Same as Binance spot (3x trust in RTDS)
-        bias_learning_rate: float = 0.01,  # Same as spot/RTDS blend
+        bias_learning_rate: float = 0.06,  # Same as spot/RTDS blend
         initial_binance_perp_bias: float = 0.0,  # Initialize with current funding-driven premium
     ):
         """

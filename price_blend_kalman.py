@@ -28,7 +28,7 @@ class PriceBlendKalman:
         process_var_per_sec: float = 10.0**2,
         rtds_meas_var: float = 2.0**2,
         binance_meas_var: float = 3.5**2,  # 3x trust in RTDS vs Binance (was 6x with 5.0**2)
-        bias_learning_rate: float = 0.01,
+        bias_learning_rate: float = 0.06, # was .01
     ):
         """
         Parameters
@@ -59,7 +59,7 @@ class PriceBlendKalman:
 
         # Bias tracking with exponential moving average
         self.rtds_bias = 0.0
-        self.binance_bias = -7.0  # Initialize: Binance typically $7 lower than RTDS
+        self.binance_bias = -9.0  # Initialize: Binance typically $7 lower than RTDS
         self.bias_alpha = bias_learning_rate  # EMA smoothing factor
 
         # Track observations for bias estimation
