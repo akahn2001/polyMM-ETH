@@ -8,6 +8,10 @@ from trading import perform_trade
 
 import global_state
 
+# Bias correction parameters
+MIN_SAMPLES_FOR_BIAS = 400  # Require 400 samples (~3-7 minutes) before using calculated bias
+BIAS_LOOKBACK_SECONDS = 10 * 60  # 10-minute moving average window
+
 
 def _set_tcp_nodelay(ws):
     """Disable Nagle's algorithm for lower latency."""
@@ -19,6 +23,32 @@ def _set_tcp_nodelay(ws):
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     except Exception:
         pass
+
+
+def _update_coinbase_bias_correction(rtds_price: float):
+    """
+    Update Coinbase bias correction by tracking RTDS - Coinbase spread.
+    Uses 10-minute simple moving average after 400+ samples collected.
+    """
+    if not hasattr(global_state, 'coinbase_mid_price') or global_state.coinbase_mid_price is None:
+        return  # Can't calculate bias without Coinbase price
+
+    # Calculate spread (positive means RTDS is above Coinbase)
+    spread = rtds_price - global_state.coinbase_mid_price
+    now = time.time()
+
+    # Store spread
+    global_state.coinbase_rtds_spread_history.append((now, spread))
+
+    # Calculate 10-minute moving average
+    cutoff_time = now - BIAS_LOOKBACK_SECONDS
+    recent_spreads = [s for (ts, s) in global_state.coinbase_rtds_spread_history if ts >= cutoff_time]
+
+    # Only use calculated bias if we have enough samples
+    if len(recent_spreads) >= MIN_SAMPLES_FOR_BIAS:
+        import numpy as np
+        global_state.coinbase_bias_correction = np.mean(recent_spreads)
+    # else: keep initial 2.0 assumption until we have enough data
 
 RTDS_URL = "wss://ws-live-data.polymarket.com"
 
@@ -86,6 +116,9 @@ async def stream_btc_usd():
                                 print(f"[RTDS] First price received: ${mid_price:.2f}")
                                 global_state.rtds_connected = True
 
+                            # Update Coinbase bias correction (track RTDS - Coinbase spread)
+                            _update_coinbase_bias_correction(mid_price)
+
                             # Update price blend Kalman filter with RTDS observation
                             if hasattr(global_state, 'price_blend_filter') and global_state.price_blend_filter is not None:
                                 global_state.price_blend_filter.update_rtds(mid_price)
@@ -105,6 +138,9 @@ async def stream_btc_usd():
                             if not global_state.rtds_connected:
                                 print(f"[RTDS] First price received: ${mid_price:.2f}")
                                 global_state.rtds_connected = True
+
+                            # Update Coinbase bias correction (track RTDS - Coinbase spread)
+                            _update_coinbase_bias_correction(mid_price)
 
                             # Update price blend Kalman filter with RTDS observation
                             if hasattr(global_state, 'price_blend_filter') and global_state.price_blend_filter is not None:

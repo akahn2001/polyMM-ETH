@@ -84,6 +84,10 @@ coinbase_mid_ts = None
 coinbase_mid_bid = None
 coinbase_mid_ask = None
 
+# Coinbase bias correction (tracks systematic difference from RTDS)
+coinbase_rtds_spread_history = deque(maxlen=1000)  # Track (timestamp, rtds - coinbase) tuples
+coinbase_bias_correction = 2.0  # Dollars to add to Coinbase for theo (initial assumption: CB is $2 below RTDS)
+
 # Price blending (Kalman filter combining Binance + RTDS)
 price_blend_filter = None
 blended_price = None

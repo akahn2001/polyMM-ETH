@@ -733,7 +733,7 @@ async def perform_trade(market_id: str):
     book_mid = .5*(best_bid_yes+best_ask_yes)
 
     # Blend theo (75%) with book mid (25%) for quoting
-    # Theo reacts to Binance, book mid anchors to market reality
+    # Theo reacts to spot price (Coinbase or blend), book mid anchors to market reality
     theo = info["fair"]  # global_state.fair_value[market_id]
     fair_yes = 0.70 * theo + 0.30 * book_mid
 
@@ -752,9 +752,9 @@ async def perform_trade(market_id: str):
         if len(price_history) >= 2:
             current_price = price_history[-1][1]
 
-            # Find price from BINANCE_MOMENTUM_LOOKBACK seconds ago
+            # Find price from MOMENTUM_LOOKBACK seconds ago
             for ts, price in reversed(list(price_history)[:-1]):
-                if now - ts >= BINANCE_MOMENTUM_LOOKBACK:
+                if now - ts >= BINANCE_MOMENTUM_LOOKBACK:  # Note: variable name is legacy, works for both Coinbase and Binance
                     old_price = price
                     momentum = current_price - old_price
                     break

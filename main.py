@@ -82,12 +82,16 @@ def update_periodically(client):
                 # Get prices based on which mode we're in
                 if global_state.USE_COINBASE_PRICE:
                     coinbase_spot = global_state.coinbase_mid_price
+                    bias = global_state.coinbase_bias_correction
+                    coinbase_adjusted = coinbase_spot + bias if coinbase_spot is not None else None
                     exchange_spot = coinbase_spot
                     blended_spot = None  # Not used in Coinbase mode
                 else:
                     binance_spot_usd = global_state.binance_mid_price * global_state.usdtusd if global_state.binance_mid_price else None
                     exchange_spot = binance_spot_usd
                     blended_spot = global_state.blended_price
+                    bias = None
+                    coinbase_adjusted = None
 
                 # Get Polymarket order book bid/offer
                 market_bid, market_offer = None, None
@@ -101,7 +105,8 @@ def update_periodically(client):
                 # Only print if we have valid prices
                 if global_state.USE_COINBASE_PRICE:
                     if exchange_spot is not None and main_theo is not None and fair_vol is not None:
-                        print(f"RTDS: {rtds_spot:.2f}  COINBASE: {exchange_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
+                        # Show Coinbase, bias correction, and adjusted price
+                        print(f"RTDS: {rtds_spot:.2f}  CB: {exchange_spot:.2f}  BIAS: {bias:+.2f}  CB_ADJ: {coinbase_adjusted:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
                 else:
                     if exchange_spot is not None and blended_spot is not None and main_theo is not None and fair_vol is not None:
                         print(f"RTDS: {rtds_spot:.2f}  BINANCE: {exchange_spot:.2f}  BLEND: {blended_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")

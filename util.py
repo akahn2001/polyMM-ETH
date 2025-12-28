@@ -133,7 +133,7 @@ def update_fair_vol_for_market(market_id):
 
     # Get current BTC spot (Coinbase if USE_COINBASE_PRICE=True, else blended)
     if global_state.USE_COINBASE_PRICE:
-        S = global_state.coinbase_mid_price
+        S = global_state.coinbase_mid_price + global_state.coinbase_bias_correction
     else:
         S = global_state.blended_price
 
@@ -176,7 +176,7 @@ def update_fair_value_for_market(market_id: str):
     """
     # 1) Inputs - use Coinbase or blended price based on configuration
     if global_state.USE_COINBASE_PRICE:
-        S = global_state.coinbase_mid_price  # Use pure Coinbase price
+        S = global_state.coinbase_mid_price + global_state.coinbase_bias_correction  # Bias-corrected Coinbase
     else:
         S = global_state.blended_price  # Use Kalman blend (Binance + RTDS)
 

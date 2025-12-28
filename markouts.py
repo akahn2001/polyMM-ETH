@@ -106,7 +106,7 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
         try:
             current_price = price_history[-1][1]
             for t, p in reversed(list(price_history)[:-1]):
-                if time.time() - t >= 0.5:  # Match BINANCE_MOMENTUM_LOOKBACK
+                if time.time() - t >= 0.5:  # Match MOMENTUM_LOOKBACK (0.5s lookback)
                     momentum = current_price - p
                     break
         except:
