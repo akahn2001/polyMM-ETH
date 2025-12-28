@@ -27,7 +27,7 @@ class PriceBlendKalman:
         P0: float = 100.0**2,
         process_var_per_sec: float = 10.0**2,
         rtds_meas_var: float = 2.0**2,
-        binance_meas_var: float = 14.0**2,  # 3x trust in RTDS vs Binance (was 6x with 5.0**2)
+        binance_meas_var: float = 15.0**2,  # 3x trust in RTDS vs Binance (was 6x with 5.0**2), # changed from 14
         bias_learning_rate: float = 0.06, # was .01
         pause_bias_learning_during_movement: bool = True,  # Only learn bias during stable periods
     ):
