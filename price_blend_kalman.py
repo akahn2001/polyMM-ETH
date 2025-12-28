@@ -28,7 +28,7 @@ class PriceBlendKalman:
         process_var_per_sec: float = 10.0**2,
         rtds_meas_var: float = 2.0**2,
         binance_meas_var: float = 5.0**2,  # 3x trust in RTDS vs Binance (was 6x with 5.0**2)
-        bias_learning_rate: float = 0.01, # was .01
+        bias_learning_rate: float = 0.06, # was .01
     ):
         """
         Parameters
@@ -149,9 +149,19 @@ class PriceBlendKalman:
         # Predict step
         self.predict(dt)
 
-        # Update step
+        # Update step with adaptive measurement variance
+        # Innovation (before Kalman update)
         y = z_binance - self.binance_bias - self.x
-        S = self.P + self.R_binance
+
+        # Adaptive variance: trust Binance MORE during big moves
+        innovation_magnitude = abs(y)
+        if innovation_magnitude > 1.0:  # Big move threshold ($3)
+            R_adaptive = self.R_binance * 0.3  # Trust Binance 3x more during large moves
+        else:
+            R_adaptive = self.R_binance  # Normal trust for small moves
+
+        # Kalman update with adaptive variance
+        S = self.P + R_adaptive
         K = self.P / S
         self.x += K * y
         self.P *= (1.0 - K)
