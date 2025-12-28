@@ -303,8 +303,9 @@ async def main():
         P0=100.0**2,
         process_var_per_sec=10.0**2,
         rtds_meas_var=2.0**2,
-        binance_meas_var=3.5**2,  # Lower noise = higher weight on Binance = faster response
-        bias_learning_rate=0.025,  # Faster bias adaptation (was 0.01)
+        binance_meas_var=14.0**2,  # Lower noise = higher weight on Binance = faster response
+        bias_learning_rate=0.06,  # Faster bias adaptation (was 0.01)
+        pause_bias_learning_during_movement=True
     )
     global_state.blended_price = initial_btcusd_corrected
     print(f"[INIT] Price blend Kalman filter initialized with x0={initial_btcusd_corrected:.2f}")
