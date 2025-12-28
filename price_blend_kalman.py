@@ -109,12 +109,22 @@ class PriceBlendKalman:
         # Predict step
         self.predict(dt)
 
-        # Update step (Kalman update)
+        # Update step with adaptive measurement variance
         # Innovation: y = z - H*x where H=1
         y = z_rtds - self.rtds_bias - self.x
 
+        # Adaptive variance: trust RTDS LESS when Binance is recently changing
+        time_since_binance_change = current_time - self.last_binance_change_time
+        if time_since_binance_change < 10.0:
+            # Decay from low trust (10x variance) to normal trust (1x) over 10 seconds
+            # This allows blend to follow Binance during active movement
+            trust_multiplier = 10.0 - 9.0 * (time_since_binance_change / 10.0)
+            R_adaptive = self.R_rtds * trust_multiplier
+        else:
+            R_adaptive = self.R_rtds  # Normal trust after 10s of Binance stability
+
         # Innovation covariance: S = H*P*H' + R
-        S = self.P + self.R_rtds
+        S = self.P + R_adaptive
 
         # Kalman gain: K = P*H' / S
         K = self.P / S
