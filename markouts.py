@@ -95,14 +95,19 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
         fill_yes = 1.0 - float(price)
         dir_yes  = -1 if side.upper() == "BUY" else +1   # BUY NO makes you shorter YES
 
-    # Capture diagnostic info at time of fill
-    binance_momentum = 0.0
-    if hasattr(global_state, 'binance_price_history') and len(global_state.binance_price_history) >= 2:
+    # Capture diagnostic info at time of fill (use Coinbase if USE_COINBASE_PRICE=True, else Binance)
+    momentum = 0.0
+    if global_state.USE_COINBASE_PRICE:
+        price_history = global_state.coinbase_price_history
+    else:
+        price_history = global_state.binance_price_history
+
+    if hasattr(global_state, price_history.__class__.__name__) and len(price_history) >= 2:
         try:
-            current_binance = global_state.binance_price_history[-1][1]
-            for t, p in reversed(list(global_state.binance_price_history)[:-1]):
+            current_price = price_history[-1][1]
+            for t, p in reversed(list(price_history)[:-1]):
                 if time.time() - t >= 0.5:  # Match BINANCE_MOMENTUM_LOOKBACK
-                    binance_momentum = current_binance - p
+                    momentum = current_price - p
                     break
         except:
             pass
@@ -127,7 +132,11 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
 
     # Calculate theo using realized vol instead of implied vol
     realized_vol_theo = None
-    S_current = global_state.blended_price
+    if global_state.USE_COINBASE_PRICE:
+        S_current = global_state.coinbase_mid_price
+    else:
+        S_current = global_state.blended_price
+
     if S_current is not None and realized_vol_15m is not None:
         from util import bs_binary_call
         K = global_state.strike
@@ -153,10 +162,14 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
     fair_yes = market_mid if market_mid else 0.0
 
     # Reprice option with momentum (includes gamma, matching trading.py)
-    S_current = global_state.blended_price
+    if global_state.USE_COINBASE_PRICE:
+        S_current = global_state.coinbase_mid_price
+    else:
+        S_current = global_state.blended_price
+
     sigma = global_state.fair_vol.get(market_id)
 
-    if S_current is not None and sigma is not None and binance_momentum != 0:
+    if S_current is not None and sigma is not None and momentum != 0:
         from util import bs_binary_call
 
         K = global_state.strike
@@ -170,7 +183,7 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
             current_option_price = bs_binary_call(S_current, K, T, r, sigma, q, payoff)
 
             # Price option at spot + momentum
-            S_after_momentum = S_current + binance_momentum
+            S_after_momentum = S_current + momentum
             new_option_price = bs_binary_call(S_after_momentum, K, T, r, sigma, q, payoff)
 
             # Predicted move (includes gamma!)
@@ -216,8 +229,8 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
         "done": set(),   # horizons already computed
         "m": {},         # horizon -> markout pnl
         # Diagnostic fields
-        "binance_momentum": binance_momentum,
-        "momentum_volatility": momentum_volatility,  # How choppy is Binance?
+        "momentum": momentum,  # Price momentum (Coinbase or Binance based on config)
+        "momentum_volatility": momentum_volatility,  # How choppy is price?
         "delta": delta,
         "theo": theo,
         "binance_theo": binance_theo,
@@ -351,7 +364,7 @@ def _write_detailed_fills_csv():
     with open(detailed_path, "a", newline="") as f:
         fieldnames = [
             "timestamp", "order_type", "fill_yes", "dir_yes", "side", "token_type", "qty",
-            "binance_momentum", "momentum_volatility", "delta",
+            "momentum", "momentum_volatility", "delta",
             "theo", "binance_theo", "market_mid", "fair_yes",
             "edge_vs_theo", "edge_vs_fair", "model_vs_market",
             "net_yes_before", "net_yes_after", "book_imbalance",
@@ -386,7 +399,7 @@ def _write_detailed_fills_csv():
                 "side": rec.get("side"),
                 "token_type": rec.get("token_type"),
                 "qty": rec.get("qty"),
-                "binance_momentum": rec.get("binance_momentum"),
+                "momentum": rec.get("momentum"),
                 "momentum_volatility": rec.get("momentum_volatility"),
                 "delta": rec.get("delta"),
                 "theo": rec.get("theo"),

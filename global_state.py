@@ -13,6 +13,9 @@ USER_OWNER_ID = "36e9b72d-fb6b-151f-0ad7-869f32584268"
 trading_enabled = False  # Scheduler enables this after configuring first market, DO NOT TOGGLE THIS MANUALLY
 dry_run = False  # Set to False to enable live trading, DO TOGGLE THIS MANUALLY
 
+# Price source configuration
+USE_COINBASE_PRICE = True  # If True, use pure Coinbase mid price; if False, use Kalman blend (Binance/RTDS)
+
 # Bot start timestamp (for uptime tracking)
 bot_start_ts = None
 
@@ -75,6 +78,12 @@ binance_mid_ts = None
 binance_mid_bid = None
 binance_mid_ask = None
 
+# Coinbase price stream data (BTC/USD, native USD)
+coinbase_mid_price = None
+coinbase_mid_ts = None
+coinbase_mid_bid = None
+coinbase_mid_ask = None
+
 # Price blending (Kalman filter combining Binance + RTDS)
 price_blend_filter = None
 blended_price = None
@@ -103,3 +112,6 @@ usdtusd = .999425
 
 # Binance price history for momentum calculation (deque for O(1) append, auto-evicts old)
 binance_price_history = deque(maxlen=500)  # (timestamp, price_usd) tuples
+
+# Coinbase price history for momentum calculation (deque for O(1) append, auto-evicts old)
+coinbase_price_history = deque(maxlen=500)  # (timestamp, price_usd) tuples

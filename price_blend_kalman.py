@@ -30,6 +30,7 @@ class PriceBlendKalman:
         binance_meas_var: float = 15.0**2,  # 3x trust in RTDS vs Binance (was 6x with 5.0**2), # changed from 14
         bias_learning_rate: float = 0.06, # was .01
         pause_bias_learning_during_movement: bool = True,  # Only learn bias during stable periods
+        use_adaptive_trust: bool = True,  # Enable dynamic trust based on price movement
     ):
         """
         Parameters
@@ -49,6 +50,9 @@ class PriceBlendKalman:
         pause_bias_learning_during_movement : bool
             If True, only update bias during stable periods (>10s since last Binance change)
             Prevents bias learning from confusing lead/lag dynamics with systematic bias
+        use_adaptive_trust : bool
+            If True, dynamically adjust trust in Binance/RTDS based on recent price movement
+            If False, use constant measurement variances (no dynamic trust adjustment)
         """
         self.x = x0  # State estimate (blended price)
         self.P = P0  # State covariance
@@ -70,6 +74,9 @@ class PriceBlendKalman:
         self.warmup_duration = 10.0  # seconds
         self.warmup_complete = False  # Track if we've logged the transition
         self.pause_bias_learning_during_movement = pause_bias_learning_during_movement
+
+        # Adaptive trust settings
+        self.use_adaptive_trust = use_adaptive_trust
 
         # Track observations for bias estimation
         self.rtds_observation_count = 0
@@ -114,16 +121,20 @@ class PriceBlendKalman:
         y = z_rtds - self.rtds_bias - self.x
 
         # Adaptive variance: trust RTDS LESS when Binance is recently changing
-        time_since_binance_change = current_time - self.last_binance_change_time
-        if time_since_binance_change < 5.0:
-            # Quadratic decay: stay aggressive longer, then transition quickly
-            # This allows blend to follow Binance during active movement
-            normalized_time = time_since_binance_change / 5.0
-            decay = normalized_time ** 2  # Quadratic decay
-            trust_multiplier = 10.0 - 9.0 * decay  # 10x -> 1x
-            R_adaptive = self.R_rtds * trust_multiplier
+        if self.use_adaptive_trust:
+            time_since_binance_change = current_time - self.last_binance_change_time
+            if time_since_binance_change < 5.0:
+                # Quadratic decay: stay aggressive longer, then transition quickly
+                # This allows blend to follow Binance during active movement
+                normalized_time = time_since_binance_change / 5.0
+                decay = normalized_time ** 2  # Quadratic decay
+                trust_multiplier = 10.0 - 9.0 * decay  # 10x -> 1x
+                R_adaptive = self.R_rtds * trust_multiplier
+            else:
+                R_adaptive = self.R_rtds  # Normal trust after 5s of Binance stability
         else:
-            R_adaptive = self.R_rtds  # Normal trust after 5s of Binance stability
+            # Fixed trust - no dynamic adjustment
+            R_adaptive = self.R_rtds
 
         # Innovation covariance: S = H*P*H' + R
         S = self.P + R_adaptive
@@ -186,15 +197,19 @@ class PriceBlendKalman:
         y = z_binance - self.binance_bias - self.x
 
         # Adaptive variance: trust Binance MORE when it's recently changed
-        time_since_change = current_time - self.last_binance_change_time
-        if time_since_change < 5.0:
-            # Quadratic decay: stay aggressive longer, then transition quickly
-            normalized_time = time_since_change / 5.0
-            decay = normalized_time ** 2  # Quadratic decay
-            trust_multiplier = 0.1 + 0.9 * decay  # 0.1x -> 1x
-            R_adaptive = self.R_binance * trust_multiplier
+        if self.use_adaptive_trust:
+            time_since_change = current_time - self.last_binance_change_time
+            if time_since_change < 5.0:
+                # Quadratic decay: stay aggressive longer, then transition quickly
+                normalized_time = time_since_change / 5.0
+                decay = normalized_time ** 2  # Quadratic decay
+                trust_multiplier = 0.1 + 0.9 * decay  # 0.1x -> 1x
+                R_adaptive = self.R_binance * trust_multiplier
+            else:
+                R_adaptive = self.R_binance  # Normal trust after 5s of no changes
         else:
-            R_adaptive = self.R_binance  # Normal trust after 5s of no changes
+            # Fixed trust - no dynamic adjustment
+            R_adaptive = self.R_binance
 
         # Kalman update with adaptive variance
         S = self.P + R_adaptive

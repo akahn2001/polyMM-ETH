@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 def compute_realized_vol(lookback_minutes: float = 15.0) -> float | None:
     """
-    Calculate annualized realized volatility from Binance price history.
+    Calculate annualized realized volatility from price history (Coinbase if USE_COINBASE_PRICE=True, else Binance).
 
     Uses log returns from the price history deque. Returns None if insufficient
     data is available (cold start protection).
@@ -25,10 +25,16 @@ def compute_realized_vol(lookback_minutes: float = 15.0) -> float | None:
     float or None
         Annualized realized volatility, or None if insufficient data
     """
-    if not hasattr(global_state, 'binance_price_history'):
-        return None
+    # Use appropriate price history based on configuration
+    if global_state.USE_COINBASE_PRICE:
+        if not hasattr(global_state, 'coinbase_price_history'):
+            return None
+        history = global_state.coinbase_price_history
+    else:
+        if not hasattr(global_state, 'binance_price_history'):
+            return None
+        history = global_state.binance_price_history
 
-    history = global_state.binance_price_history
     if len(history) < 10:
         return None
 
@@ -125,8 +131,12 @@ def update_fair_vol_for_market(market_id):
     best_bid_px = bids.peekitem(-1)[0]  # highest bid price
     best_ask_px = asks.peekitem(0)[0]   # lowest ask price
 
-    # Get current BTC spot (use blended price for consistency)
-    S = global_state.blended_price
+    # Get current BTC spot (Coinbase if USE_COINBASE_PRICE=True, else blended)
+    if global_state.USE_COINBASE_PRICE:
+        S = global_state.coinbase_mid_price
+    else:
+        S = global_state.blended_price
+
     if S is None:
         return  # no spot yet
 
@@ -162,10 +172,14 @@ def update_fair_vol_for_market(market_id):
 def update_fair_value_for_market(market_id: str):
     """
     Recompute the fair value (theo) of a Polymarket binary for this market_id,
-    using blended BTC spot and current fair vol from the Kalman filter.
+    using BTC spot price (Coinbase if USE_COINBASE_PRICE=True, else blended) and current fair vol from the Kalman filter.
     """
-    # 1) Inputs - use blended price for consistency with vol calibration
-    S = global_state.blended_price
+    # 1) Inputs - use Coinbase or blended price based on configuration
+    if global_state.USE_COINBASE_PRICE:
+        S = global_state.coinbase_mid_price  # Use pure Coinbase price
+    else:
+        S = global_state.blended_price  # Use Kalman blend (Binance + RTDS)
+
     sigma = global_state.fair_vol.get(market_id)
 
     if S is None or sigma is None:

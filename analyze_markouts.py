@@ -163,7 +163,7 @@ def momentum_analysis(df):
     print("=" * 80)
 
     # Correlation
-    mom_corr = df['binance_momentum'].corr(df['markout_5s'])
+    mom_corr = df['momentum'].corr(df['markout_5s'])
     print(f"Momentum → Markout correlation: {mom_corr:.3f}")
     if mom_corr > 0.1:
         print("  ✅ Positive correlation - momentum has predictive power!")
@@ -173,11 +173,11 @@ def momentum_analysis(df):
         print("  ❌ Negative/zero correlation - momentum NOT working!")
 
     # Performance by momentum regime
-    print(f"\nPerformance by Binance momentum:")
+    print(f"\nPerformance by momentum:")
 
-    rising = df[df['binance_momentum'] > 10]
-    falling = df[df['binance_momentum'] < -10]
-    flat = df[abs(df['binance_momentum']) <= 10]
+    rising = df[df['momentum'] > 10]
+    falling = df[df['momentum'] < -10]
+    flat = df[abs(df['momentum']) <= 10]
 
     print(f"  Rising (>$10):   {len(rising):3d} fills, avg markout=${rising['markout_5s'].mean():.4f}")
     _, _, _, rising_sig = significance_test(rising['markout_5s']) if len(rising) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
@@ -192,8 +192,8 @@ def momentum_analysis(df):
     if flat_sig: print(f"                   {flat_sig}")
 
     # Should momentum fills have better markouts?
-    momentum_fills = df[abs(df['binance_momentum']) > 10]
-    flat_fills = df[abs(df['binance_momentum']) <= 10]
+    momentum_fills = df[abs(df['momentum']) > 10]
+    flat_fills = df[abs(df['momentum']) <= 10]
 
     print(f"\n  Momentum fills (|mom|>$10): avg markout=${momentum_fills['markout_5s'].mean():.4f}")
     print(f"  Flat fills (|mom|≤$10):     avg markout=${flat_fills['markout_5s'].mean():.4f}")
@@ -557,15 +557,15 @@ def momentum_attribution_analysis(df):
     print(f"  Neutral fills:         {len(neutral)} fills")
 
     # Compare momentum during different fill types
-    print(f"\nAverage |binance_momentum| by fill type:")
+    print(f"\nAverage |momentum| by fill type:")
     if len(bad_fills) > 0:
-        bad_mom = bad_fills['binance_momentum'].abs().mean()
+        bad_mom = bad_fills['momentum'].abs().mean()
         print(f"  Bad fills:  ${bad_mom:.2f}")
     if len(good_fills) > 0:
-        good_mom = good_fills['binance_momentum'].abs().mean()
+        good_mom = good_fills['momentum'].abs().mean()
         print(f"  Good fills: ${good_mom:.2f}")
     if len(neutral) > 0:
-        neutral_mom = neutral['binance_momentum'].abs().mean()
+        neutral_mom = neutral['momentum'].abs().mean()
         print(f"  Neutral:    ${neutral_mom:.2f}")
 
     if len(bad_fills) > 0 and len(good_fills) > 0:
@@ -602,7 +602,7 @@ def momentum_attribution_analysis(df):
     # Show worst fills
     if len(bad_fills) >= 5:
         print(f"\nWorst 5 fills (most adverse selection):")
-        worst = bad_fills.nsmallest(5, 'markout_5s')[['timestamp', 'edge_vs_fair', 'markout_5s', 'binance_momentum', 'momentum_volatility']]
+        worst = bad_fills.nsmallest(5, 'markout_5s')[['timestamp', 'edge_vs_fair', 'markout_5s', 'momentum', 'momentum_volatility']]
         print(worst.to_string(index=False))
 
 def maker_vs_taker_analysis(df):
@@ -656,8 +656,8 @@ def maker_vs_taker_analysis(df):
 
         # Momentum during fills
         print(f"\nMomentum during fills:")
-        print(f"  Maker avg |momentum|: ${gtc['binance_momentum'].abs().mean():.2f}")
-        print(f"  Taker avg |momentum|: ${ioc['binance_momentum'].abs().mean():.2f}")
+        print(f"  Maker avg |momentum|: ${gtc['momentum'].abs().mean():.2f}")
+        print(f"  Taker avg |momentum|: ${ioc['momentum'].abs().mean():.2f}")
 
         # Diagnosis
         print(f"\nDiagnosis:")
@@ -695,7 +695,7 @@ def summary_and_diagnosis(df):
         issues.append("❌ CRITICAL: Delta near zero - momentum not working!")
 
     # Check momentum correlation
-    mom_corr = df['binance_momentum'].corr(df['markout_5s'])
+    mom_corr = df['momentum'].corr(df['markout_5s'])
     if mom_corr < 0:
         issues.append("❌ Negative momentum correlation - strategy backwards?")
     elif mom_corr < 0.05:

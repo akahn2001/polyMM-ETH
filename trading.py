@@ -737,27 +737,38 @@ async def perform_trade(market_id: str):
     theo = info["fair"]  # global_state.fair_value[market_id]
     fair_yes = 0.70 * theo + 0.30 * book_mid
 
-    # Add Binance momentum adjustment if enabled (skip entirely when disabled for speed)
+    # Add momentum adjustment if enabled (uses Coinbase if USE_COINBASE_PRICE=True, else Binance)
     if not USE_BINANCE_MOMENTUM:
         pass  # Skip momentum calculation entirely
     elif USE_BINANCE_MOMENTUM:
-        binance_momentum = 0.0
-        if hasattr(global_state, 'binance_price_history') and len(global_state.binance_price_history) >= 2:
-            current_binance = global_state.binance_price_history[-1][1]
+        momentum = 0.0
+
+        # Use appropriate price history based on configuration
+        if global_state.USE_COINBASE_PRICE:
+            price_history = global_state.coinbase_price_history
+        else:
+            price_history = global_state.binance_price_history
+
+        if hasattr(global_state, price_history.__class__.__name__) and len(price_history) >= 2:
+            current_price = price_history[-1][1]
 
             # Find price from BINANCE_MOMENTUM_LOOKBACK seconds ago
-            for ts, price in reversed(list(global_state.binance_price_history)[:-1]):
+            for ts, price in reversed(list(price_history)[:-1]):
                 if now - ts >= BINANCE_MOMENTUM_LOOKBACK:
-                    old_binance = price
-                    binance_momentum = current_binance - old_binance
+                    old_price = price
+                    momentum = current_price - old_price
                     break
 
         # Reprice option with momentum-adjusted spot (includes gamma!)
-        # Get current blended price and option parameters
-        S_current = global_state.blended_price
+        # Get current spot price and option parameters
+        if global_state.USE_COINBASE_PRICE:
+            S_current = global_state.coinbase_mid_price
+        else:
+            S_current = global_state.blended_price
+
         sigma = global_state.fair_vol.get(market_id)
 
-        if S_current is not None and sigma is not None and binance_momentum != 0:
+        if S_current is not None and sigma is not None and momentum != 0:
             # Get option parameters
             K = global_state.strike
             now_et = datetime.now(ZoneInfo("America/New_York"))
@@ -771,7 +782,7 @@ async def perform_trade(market_id: str):
                 current_option_price = bs_binary_call(S_current, K, T, r, sigma, q, payoff)
 
                 # Price option at spot + momentum
-                S_after_momentum = S_current + binance_momentum
+                S_after_momentum = S_current + momentum
                 new_option_price = bs_binary_call(S_after_momentum, K, T, r, sigma, q, payoff)
 
                 # Predicted move (automatically includes gamma!)

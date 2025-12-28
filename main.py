@@ -21,6 +21,7 @@ from polymarket_client import PolymarketClient
 from websocket_handlers import connect_market_websocket, connect_user_websocket
 from price_stream import stream_btc_usd
 from binance_price_stream import get_usdt_usd_rate, get_binance_btcusdt_mid, stream_binance_btcusdt_mid
+from coinbase_price_stream import stream_coinbase_btcusd_mid
 from util import get_best_bid_offer, bs_binary_call, bs_binary_call_implied_vol_closed
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -336,7 +337,8 @@ async def main():
             await asyncio.gather(
                 connect_market_websocket(global_state.all_subscription_tokens),  # Subscribe to all markets
                 stream_btc_usd(),
-                stream_binance_btcusdt_mid(verbose=False),  # Stream Binance prices and auto-update Binance theos
+                stream_binance_btcusdt_mid(verbose=False),  # Stream Binance prices (for fallback mode)
+                stream_coinbase_btcusd_mid(verbose=False),  # Stream Coinbase prices (primary when USE_COINBASE_PRICE=True)
                 connect_user_websocket(client.creds.api_key, client.creds.api_secret, client.creds.api_passphrase),
                 reconcile_loop_all(),
                 markout_loop(),
