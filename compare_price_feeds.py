@@ -774,9 +774,12 @@ async def status_printer():
         else:
             parts.append("BinSpot: --")
 
-        if binance_perp_mid is not None and binance_mid_usd is not None:
-            basis = binance_perp_mid - binance_mid_usd
-            parts.append(f"BinPerp: {basis:+.1f}")
+        if binance_perp_mid is not None:
+            if binance_mid_usd is not None:
+                basis = binance_perp_mid - binance_mid_usd
+                parts.append(f"BinPerp: ${binance_perp_mid:.2f} ({basis:+.1f})")
+            else:
+                parts.append(f"BinPerp: ${binance_perp_mid:.2f}")
         else:
             parts.append("BinPerp: --")
 
@@ -819,6 +822,11 @@ async def status_printer():
         parts.append(f"n={len(samples)}")
 
         print(f"[STATUS] " + " | ".join(parts))
+
+        # Print Kalman filter state for debugging bias adjustment
+        if kalman_perp_filter is not None:
+            state = kalman_perp_filter.get_state()
+            print(f"[FILTER] Perp blend - RTDS_bias: ${state['rtds_bias']:+.2f} | Binance_perp_bias: ${state['binance_perp_bias']:+.2f} | RTDS_obs: {state['rtds_obs_count']} | Perp_obs: {state['binance_perp_obs_count']} | Uncertainty: ${state['uncertainty']:.2f}")
 
         await asyncio.sleep(5)
 
