@@ -75,13 +75,19 @@ def update_periodically(client):
         if global_state.all_tokens:
             market_id = token_to_condition_id.get(global_state.all_tokens[0])
             if market_id:
-                blended_theo = global_state.fair_value.get(market_id)  # Now uses blended price
-                binance_theo = global_state.binance_fair_value.get(market_id)
+                main_theo = global_state.fair_value.get(market_id)  # Uses Coinbase if USE_COINBASE_PRICE=True, else blend
                 rtds_spot = global_state.mid_price
                 fair_vol = global_state.fair_vol.get(market_id)
-                blended_spot = global_state.blended_price
-                # Adjust Binance BTCUSDT to BTCUSD
-                binance_spot_usd = global_state.binance_mid_price * global_state.usdtusd if global_state.binance_mid_price else None
+
+                # Get prices based on which mode we're in
+                if global_state.USE_COINBASE_PRICE:
+                    coinbase_spot = global_state.coinbase_mid_price
+                    exchange_spot = coinbase_spot
+                    blended_spot = None  # Not used in Coinbase mode
+                else:
+                    binance_spot_usd = global_state.binance_mid_price * global_state.usdtusd if global_state.binance_mid_price else None
+                    exchange_spot = binance_spot_usd
+                    blended_spot = global_state.blended_price
 
                 # Get Polymarket order book bid/offer
                 market_bid, market_offer = None, None
@@ -92,14 +98,23 @@ def update_periodically(client):
                 except:
                     pass
 
-                print(f"RTDS SPOT: {rtds_spot}  BINANCE SPOT: {binance_spot_usd}  BLENDED: {blended_spot}  |  BLENDED THEO: {blended_theo}  BINANCE THEO: {binance_theo}")
+                # Only print if we have valid prices
+                if global_state.USE_COINBASE_PRICE:
+                    if exchange_spot is not None and main_theo is not None and fair_vol is not None:
+                        print(f"RTDS: {rtds_spot:.2f}  COINBASE: {exchange_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
+                else:
+                    if exchange_spot is not None and blended_spot is not None and main_theo is not None and fair_vol is not None:
+                        print(f"RTDS: {rtds_spot:.2f}  BINANCE: {exchange_spot:.2f}  BLEND: {blended_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
 
                 # Get realized vol from global state
                 realized_vol_5m = global_state.realized_vol_5m
                 realized_vol_15m = global_state.realized_vol_15m
 
-                # Write to CSV
-                csv_writer.writerow([current_time, rtds_spot, binance_spot_usd, blended_spot, blended_theo, binance_theo, fair_vol, market_bid, market_offer, market_mid, realized_vol_5m, realized_vol_15m])
+                # Write to CSV (handle both modes)
+                if global_state.USE_COINBASE_PRICE:
+                    csv_writer.writerow([current_time, rtds_spot, exchange_spot, None, main_theo, None, fair_vol, market_bid, market_offer, market_mid, realized_vol_5m, realized_vol_15m])
+                else:
+                    csv_writer.writerow([current_time, rtds_spot, exchange_spot, blended_spot, main_theo, None, fair_vol, market_bid, market_offer, market_mid, realized_vol_5m, realized_vol_15m])
                 csv_file.flush()  # Ensure data is written immediately
 
         time.sleep(0.5)
@@ -334,11 +349,18 @@ async def main():
             #    connect_market_websocket(global_state.all_tokens),
              #   connect_user_websocket()
             #)
+            # Select which exchange stream to use based on configuration
+            if global_state.USE_COINBASE_PRICE:
+                # Coinbase mode: RTDS + Coinbase trigger trades, no need for Binance
+                exchange_stream = stream_coinbase_btcusd_mid(verbose=False)
+            else:
+                # Blend mode: RTDS + Binance trigger trades, no need for Coinbase
+                exchange_stream = stream_binance_btcusdt_mid(verbose=False)
+
             await asyncio.gather(
                 connect_market_websocket(global_state.all_subscription_tokens),  # Subscribe to all markets
                 stream_btc_usd(),
-                stream_binance_btcusdt_mid(verbose=False),  # Stream Binance prices (for fallback mode)
-                stream_coinbase_btcusd_mid(verbose=False),  # Stream Coinbase prices (primary when USE_COINBASE_PRICE=True)
+                exchange_stream,  # Only one exchange stream needed based on mode
                 connect_user_websocket(client.creds.api_key, client.creds.api_secret, client.creds.api_passphrase),
                 reconcile_loop_all(),
                 markout_loop(),

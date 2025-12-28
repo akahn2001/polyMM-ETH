@@ -106,10 +106,11 @@ def _update_coinbase_theos(coinbase_mid_usd: float):
     update_realized_vol()
 
     # Update fair value for all BTC markets and trigger trading
-    if hasattr(global_state, 'btc_markets'):
+    # Only trigger if Coinbase is the primary price source
+    if global_state.USE_COINBASE_PRICE and hasattr(global_state, 'btc_markets'):
         for market_id in global_state.btc_markets:
             try:
-                # Update main theo (uses Coinbase if USE_COINBASE_PRICE=True, else blend)
+                # Update main theo (uses Coinbase price)
                 if update_fair_value_for_market is not None:
                     update_fair_value_for_market(market_id)
 

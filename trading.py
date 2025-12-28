@@ -749,7 +749,7 @@ async def perform_trade(market_id: str):
         else:
             price_history = global_state.binance_price_history
 
-        if hasattr(global_state, price_history.__class__.__name__) and len(price_history) >= 2:
+        if len(price_history) >= 2:
             current_price = price_history[-1][1]
 
             # Find price from BINANCE_MOMENTUM_LOOKBACK seconds ago
@@ -868,20 +868,29 @@ async def perform_trade(market_id: str):
     # Calculate spread multiplier based on option price sensitivity
     option_move_mult = 1.0
 
-    if hasattr(global_state, 'binance_price_history') and len(global_state.binance_price_history) >= 2:
+    # Use appropriate price history based on configuration
+    if global_state.USE_COINBASE_PRICE:
+        price_history_spread = global_state.coinbase_price_history
+    else:
+        price_history_spread = global_state.binance_price_history
+
+    if len(price_history_spread) >= 2:
         # Get BTC price change over lookback window
-        current_binance = global_state.binance_price_history[-1][1]
-        old_binance = None
-        for ts, price in reversed(list(global_state.binance_price_history)[:-1]):
+        current_price_spread = price_history_spread[-1][1]
+        old_price_spread = None
+        for ts, price in reversed(list(price_history_spread)[:-1]):
             if now - ts >= OPTION_MOVE_LOOKBACK:
-                old_binance = price
+                old_price_spread = price
                 break
 
-        if old_binance is not None:
-            btc_move = current_binance - old_binance
+        if old_price_spread is not None:
+            btc_move = current_price_spread - old_price_spread
 
             # Reprice option at both prices to get option price delta
-            S_current = global_state.blended_price
+            if global_state.USE_COINBASE_PRICE:
+                S_current = global_state.coinbase_mid_price
+            else:
+                S_current = global_state.blended_price
             sigma = global_state.fair_vol.get(market_id)
 
             if S_current is not None and sigma is not None and btc_move != 0:

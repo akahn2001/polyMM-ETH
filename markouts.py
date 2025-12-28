@@ -102,7 +102,7 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
     else:
         price_history = global_state.binance_price_history
 
-    if hasattr(global_state, price_history.__class__.__name__) and len(price_history) >= 2:
+    if len(price_history) >= 2:
         try:
             current_price = price_history[-1][1]
             for t, p in reversed(list(price_history)[:-1]):
@@ -203,9 +203,14 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
 
     # Calculate momentum volatility (same logic as trading.py)
     momentum_volatility = 0.0
-    if hasattr(global_state, 'binance_price_history') and len(global_state.binance_price_history) >= 5:
+    if global_state.USE_COINBASE_PRICE:
+        price_history_vol = global_state.coinbase_price_history
+    else:
+        price_history_vol = global_state.binance_price_history
+
+    if len(price_history_vol) >= 5:
         recent_momentums = []
-        prices = global_state.binance_price_history
+        prices = price_history_vol
         recent_prices = [(t, p) for t, p in prices if time.time() - t <= 5.0]
         if len(recent_prices) >= 3:
             for i in range(len(recent_prices) - 1):

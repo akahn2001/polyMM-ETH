@@ -155,7 +155,13 @@ def _update_binance_theos(binance_mid_usdt: float):
 
         # Calculate option price move using BS model
         option_move = 0.0
-        S_current = getattr(global_state, 'blended_price', None)
+
+        # Use appropriate spot price based on configuration
+        if global_state.USE_COINBASE_PRICE:
+            S_current = getattr(global_state, 'coinbase_mid_price', None)  # Using Coinbase
+        else:
+            S_current = getattr(global_state, 'blended_price', None)  # Using blend
+
         exp = getattr(global_state, 'exp', None)
         strike = getattr(global_state, 'strike', None)
 
@@ -209,20 +215,23 @@ def _update_binance_theos(binance_mid_usdt: float):
     if hasattr(global_state, 'btc_markets'):
         for market_id in global_state.btc_markets:
             try:
-                # Update Binance-specific theo
+                # Update Binance-specific theo (for monitoring only)
                 update_binance_fair_value_for_market(market_id, binance_mid_usd)
 
-                # Update main theo (uses blended price) and trigger trading
-                if update_fair_value_for_market is not None:
-                    update_fair_value_for_market(market_id)
+                # Only update main theo and trigger trading if using blend mode
+                # (When USE_COINBASE_PRICE=True, Coinbase + RTDS handle trading triggers)
+                if not global_state.USE_COINBASE_PRICE:
+                    # Update main theo (uses blended price)
+                    if update_fair_value_for_market is not None:
+                        update_fair_value_for_market(market_id)
 
-                # Fire trading logic
-                if perform_trade is not None:
-                    try:
-                        asyncio.create_task(perform_trade(market_id))
-                    except RuntimeError:
-                        # No event loop running (shouldn't happen but be safe)
-                        pass
+                    # Fire trading logic
+                    if perform_trade is not None:
+                        try:
+                            asyncio.create_task(perform_trade(market_id))
+                        except RuntimeError:
+                            # No event loop running (shouldn't happen but be safe)
+                            pass
 
             except Exception as e:
                 # Silently skip markets that don't have vol yet, etc.
