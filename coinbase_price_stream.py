@@ -1,5 +1,5 @@
 import asyncio
-import json
+import orjson
 import socket
 import time
 import websockets
@@ -145,7 +145,7 @@ async def stream_coinbase_btcusd_mid(on_mid=None, *, verbose=False):
                 ping_interval=20,
                 ping_timeout=20,
                 close_timeout=5,
-                max_queue=1024,
+                max_queue=128,  # 128 messages = ~1.3s buffer at extreme 100 msg/sec
             ) as ws:
                 # Disable Nagle's algorithm for lower latency
                 _set_tcp_nodelay(ws)
@@ -160,10 +160,10 @@ async def stream_coinbase_btcusd_mid(on_mid=None, *, verbose=False):
                     "product_ids": ["BTC-USD"],
                     "channels": ["ticker"]
                 }
-                await ws.send(json.dumps(subscribe_msg))
+                await ws.send(orjson.dumps(subscribe_msg).decode('utf-8'))
 
                 async for msg in ws:
-                    data = json.loads(msg)
+                    data = orjson.loads(msg)
 
                     msg_type = data.get("type")
 

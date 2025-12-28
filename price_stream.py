@@ -1,6 +1,7 @@
 import asyncio
-import json
+import orjson
 import socket
+import time
 import websockets
 from datetime import datetime, timezone
 from util import update_fair_value_for_market
@@ -91,7 +92,7 @@ async def stream_btc_usd():
 
                 print("[RTDS] Websocket connected, sending subscription...")
                 # Subscribe to BTC/USD Chainlink crypto price stream
-                await ws.send(json.dumps(SUBSCRIBE_MSG))
+                await ws.send(orjson.dumps(SUBSCRIBE_MSG).decode('utf-8'))
                 print("[RTDS] Connected and subscribed to crypto_prices_chainlink for btc/usd")
 
                 # Start background ping task
@@ -103,7 +104,7 @@ async def stream_btc_usd():
 
                     # RTDS messages are JSON
                     try:
-                        data = json.loads(msg)
+                        data = orjson.loads(msg)
                         #print(data)
                         try:
                             timestamp = data["payload"]["data"][0]["timestamp"]

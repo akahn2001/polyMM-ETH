@@ -4,18 +4,54 @@ from py_clob_client.clob_types import OrderArgs, BalanceAllowanceParams, AssetTy
 #from py_clob_client.order_builder.constants import AssetType
 import os
 import asyncio
+import socket
 import requests
 from requests.adapters import HTTPAdapter
+from urllib3.util.connection import create_connection
 import pandas as pd
 from dotenv import load_dotenv
 
 import global_state
 
 # ============================================================
-# HTTP CONNECTION POOLING - Reduces latency from ~65ms to ~21ms
+# HTTP CONNECTION POOLING + TCP OPTIMIZATIONS
 # ============================================================
+# Connection pooling: Reduces latency from ~65ms to ~21ms (reuses TCP connections)
+# TCP_NODELAY: Disables Nagle's algorithm for -10 to -40ms per request
+# TCP_QUICKACK (Linux): Disables delayed ACK for -20 to -40ms per request
+
+# Patch urllib3 to set TCP_NODELAY on all HTTP sockets
+_orig_create_connection = create_connection
+
+def _create_connection_with_nodelay(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
+                                     source_address=None, socket_options=None):
+    """Create connection with TCP_NODELAY and TCP_QUICKACK for minimum latency."""
+    # Add TCP_NODELAY to socket options
+    if socket_options is None:
+        socket_options = []
+    socket_options = list(socket_options) + [
+        (socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    ]
+
+    # Create the connection with TCP_NODELAY
+    sock = _orig_create_connection(address, timeout, source_address, socket_options)
+
+    # Set TCP_QUICKACK if available (Linux only)
+    # Note: kernel resets this flag after each recv(), but setting it initially
+    # helps with the first response packet (often the only packet for order APIs)
+    if hasattr(socket, 'TCP_QUICKACK'):
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_QUICKACK, 1)
+        except (OSError, AttributeError):
+            pass  # Not supported on this platform
+
+    return sock
+
+# Apply the patch globally for all urllib3/requests connections
+import urllib3.util.connection
+urllib3.util.connection.create_connection = _create_connection_with_nodelay
+
 # Create a persistent session with connection pooling
-# This reuses TCP connections instead of opening new ones per request
 _session = requests.Session()
 _adapter = HTTPAdapter(
     pool_connections=10,  # Number of connection pools
