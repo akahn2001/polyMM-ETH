@@ -259,7 +259,7 @@ EDGE_TAKE_THRESHOLD = 2.0      # edge to justify crossing when OPENING position
 EDGE_TAKE_THRESHOLD_REDUCE = 2.0  # lower threshold when REDUCING position (closing risk is more valuable)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 10             # max size for IOC orders that reduce position (also capped by position size)
-BASE_QUOTE_SPREAD = 0.050             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
+BASE_QUOTE_SPREAD = 0.040             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 10
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
@@ -295,7 +295,7 @@ BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all
 MAX_IMBALANCE_ADJUSTMENT = 0.015   # max fair value nudge (1 cent)
 
 # Early cancel threshold (option price sensitivity)
-EARLY_CANCEL_OPTION_MOVE = 1.0  # .5 cent option move triggers immediate cancel # TODO: jitter may throw this off
+EARLY_CANCEL_OPTION_MOVE = .50  # .5 cent option move triggers immediate cancel # TODO: jitter may throw this off
 
 VERBOSE = False
 
