@@ -116,9 +116,11 @@ class PriceBlendKalman:
         # Adaptive variance: trust RTDS LESS when Binance is recently changing
         time_since_binance_change = current_time - self.last_binance_change_time
         if time_since_binance_change < 5.0:
-            # Decay from low trust (10x variance) to normal trust (1x) over 5 seconds
+            # Quadratic decay: stay aggressive longer, then transition quickly
             # This allows blend to follow Binance during active movement
-            trust_multiplier = 10.0 - 9.0 * (time_since_binance_change / 5.0)
+            normalized_time = time_since_binance_change / 5.0
+            decay = normalized_time ** 2  # Quadratic decay
+            trust_multiplier = 10.0 - 9.0 * decay  # 10x -> 1x
             R_adaptive = self.R_rtds * trust_multiplier
         else:
             R_adaptive = self.R_rtds  # Normal trust after 5s of Binance stability
@@ -186,8 +188,10 @@ class PriceBlendKalman:
         # Adaptive variance: trust Binance MORE when it's recently changed
         time_since_change = current_time - self.last_binance_change_time
         if time_since_change < 5.0:
-            # Decay from high trust (0.1) to normal trust (1.0) over 5 seconds
-            trust_multiplier = 0.1 + 0.9 * (time_since_change / 5.0)
+            # Quadratic decay: stay aggressive longer, then transition quickly
+            normalized_time = time_since_change / 5.0
+            decay = normalized_time ** 2  # Quadratic decay
+            trust_multiplier = 0.1 + 0.9 * decay  # 0.1x -> 1x
             R_adaptive = self.R_binance * trust_multiplier
         else:
             R_adaptive = self.R_binance  # Normal trust after 5s of no changes
