@@ -28,7 +28,7 @@ class PriceBlendKalman:
         process_var_per_sec: float = 10.0**2,
         rtds_meas_var: float = 2.0**2,
         binance_meas_var: float = 10.0**2,  # 3x trust in RTDS vs Binance (was 6x with 5.0**2)
-        bias_learning_rate: float = 0.01, # was .01
+        bias_learning_rate: float = 0.02, # was .01
     ):
         """
         Parameters
@@ -69,6 +69,10 @@ class PriceBlendKalman:
         # Track observations for bias estimation
         self.rtds_observation_count = 0
         self.binance_observation_count = 0
+
+        # Track Binance price changes for adaptive trust
+        self.last_binance_value = None
+        self.last_binance_change_time = time.time()
 
     def predict(self, dt: float):
         """
@@ -149,16 +153,24 @@ class PriceBlendKalman:
         # Predict step
         self.predict(dt)
 
+        # Track if Binance price changed (detect movement)
+        if self.last_binance_value is not None and abs(z_binance - self.last_binance_value) > 0.01:
+            # Price changed - update last change time
+            self.last_binance_change_time = current_time
+        self.last_binance_value = z_binance
+
         # Update step with adaptive measurement variance
         # Innovation (before Kalman update)
         y = z_binance - self.binance_bias - self.x
 
-        # Adaptive variance: trust Binance MORE during big moves
-        innovation_magnitude = abs(y)
-        if innovation_magnitude > 1.0:  # Big move threshold ($3)
-            R_adaptive = self.R_binance * 0.3  # Trust Binance 3x more during large moves
+        # Adaptive variance: trust Binance MORE when it's recently changed
+        time_since_change = current_time - self.last_binance_change_time
+        if time_since_change < 10.0:
+            # Decay from high trust (0.1) to normal trust (1.0) over 10 seconds
+            trust_multiplier = 0.1 + 0.9 * (time_since_change / 10.0)
+            R_adaptive = self.R_binance * trust_multiplier
         else:
-            R_adaptive = self.R_binance  # Normal trust for small moves
+            R_adaptive = self.R_binance  # Normal trust after 10s of no changes
 
         # Kalman update with adaptive variance
         S = self.P + R_adaptive
