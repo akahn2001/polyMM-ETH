@@ -56,11 +56,14 @@ class PriceBlendKalman:
 
         # Track last update time for predict step
         self.last_update_time = time.time()
+        self.init_time = time.time()  # Track initialization time for warmup period
 
         # Bias tracking with exponential moving average
         self.rtds_bias = 0.0
         self.binance_bias = -9.0  # Initialize: Binance typically $7 lower than RTDS
-        self.bias_alpha = bias_learning_rate  # EMA smoothing factor
+        self.bias_alpha = bias_learning_rate  # EMA smoothing factor (steady-state)
+        self.bias_alpha_warmup = 0.06  # Fast learning during first 10 seconds
+        self.warmup_duration = 10.0  # seconds
 
         # Track observations for bias estimation
         self.rtds_observation_count = 0
@@ -116,9 +119,13 @@ class PriceBlendKalman:
         # After state converges, persistent innovation indicates bias
         self.rtds_observation_count += 1
         if self.rtds_observation_count > 10:  # Wait for convergence
+            # Adaptive learning rate: fast for first 10 seconds, then steady-state
+            elapsed = current_time - self.init_time
+            alpha = self.bias_alpha_warmup if elapsed < self.warmup_duration else self.bias_alpha
+
             # Only update bias after filter has settled
             residual = z_rtds - self.x
-            self.rtds_bias = (1 - self.bias_alpha) * self.rtds_bias + self.bias_alpha * residual
+            self.rtds_bias = (1 - alpha) * self.rtds_bias + alpha * residual
 
         self.last_update_time = current_time
 
@@ -147,9 +154,13 @@ class PriceBlendKalman:
         # Update bias estimate (EMA of innovations)
         self.binance_observation_count += 1
         if self.binance_observation_count > 50:  # Wait longer for Binance (more observations)
+            # Adaptive learning rate: fast for first 10 seconds, then steady-state
+            elapsed = current_time - self.init_time
+            alpha = self.bias_alpha_warmup if elapsed < self.warmup_duration else self.bias_alpha
+
             # After filter settles, track systematic bias
             residual = z_binance - self.x
-            self.binance_bias = (1 - self.bias_alpha) * self.binance_bias + self.bias_alpha * residual
+            self.binance_bias = (1 - alpha) * self.binance_bias + alpha * residual
 
         self.last_update_time = current_time
 
