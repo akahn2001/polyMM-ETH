@@ -252,17 +252,11 @@ async def stream_binance_perp():
                     binance_perp_mid = 0.5 * (binance_perp_bid + binance_perp_ask)
                     binance_perp_ts = time.time()
 
-                    # Update perp Kalman filter with Binance perp price
-                    if kalman_perp_filter is None:
-                        # Initialize filter with Binance perp premium as initial bias
-                        binance_bias, _ = get_initial_perp_biases()
-                        kalman_perp_filter = PriceBlendKalmanPerps(
-                            x0=binance_perp_mid,
-                            initial_binance_perp_bias=binance_bias
-                        )
-                    kalman_perp_filter.update_binance_perp(binance_perp_mid)
-                    blended_perp_price = kalman_perp_filter.x
-                    blended_perp_ts = time.time()
+                    # Update perp Kalman filter with Binance perp price (only if initialized)
+                    if kalman_perp_filter is not None:
+                        kalman_perp_filter.update_binance_perp(binance_perp_mid)
+                        blended_perp_price = kalman_perp_filter.x
+                        blended_perp_ts = time.time()
 
         except (asyncio.CancelledError, KeyboardInterrupt):
             raise
@@ -479,8 +473,18 @@ async def stream_rtds():
                                 blended_price = kalman_filter.x
                                 blended_ts = time.time()
 
-                            # Update perp Kalman filter with RTDS price (RTDS + perps)
-                            if kalman_perp_filter is not None:
+                            # Initialize or update perp Kalman filter with RTDS price (RTDS + perps)
+                            if kalman_perp_filter is None:
+                                # Initialize filter with first RTDS price as state, and Binance funding premium as bias
+                                binance_bias, _ = get_initial_perp_biases()
+                                kalman_perp_filter = PriceBlendKalmanPerps(
+                                    x0=rtds_price_usd,
+                                    initial_binance_perp_bias=binance_bias
+                                )
+                                blended_perp_price = kalman_perp_filter.x
+                                blended_perp_ts = time.time()
+                                print(f"[FILTER] Perp blend initialized with RTDS: ${rtds_price_usd:.2f}, Binance perp bias: ${binance_bias:+.2f}")
+                            else:
                                 kalman_perp_filter.update_rtds(rtds_price_usd)
                                 blended_perp_price = kalman_perp_filter.x
                                 blended_perp_ts = time.time()
@@ -500,8 +504,18 @@ async def stream_rtds():
                                 blended_price = kalman_filter.x
                                 blended_ts = time.time()
 
-                            # Update perp Kalman filter with RTDS price (RTDS + perps)
-                            if kalman_perp_filter is not None:
+                            # Initialize or update perp Kalman filter with RTDS price (RTDS + perps)
+                            if kalman_perp_filter is None:
+                                # Initialize filter with first RTDS price as state, and Binance funding premium as bias
+                                binance_bias, _ = get_initial_perp_biases()
+                                kalman_perp_filter = PriceBlendKalmanPerps(
+                                    x0=rtds_price_usd,
+                                    initial_binance_perp_bias=binance_bias
+                                )
+                                blended_perp_price = kalman_perp_filter.x
+                                blended_perp_ts = time.time()
+                                print(f"[FILTER] Perp blend initialized with RTDS: ${rtds_price_usd:.2f}, Binance perp bias: ${binance_bias:+.2f}")
+                            else:
                                 kalman_perp_filter.update_rtds(rtds_price_usd)
                                 blended_perp_price = kalman_perp_filter.x
                                 blended_perp_ts = time.time()
