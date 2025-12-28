@@ -115,15 +115,15 @@ class PriceBlendKalman:
 
         # Adaptive variance: trust RTDS LESS when Binance is recently changing
         time_since_binance_change = current_time - self.last_binance_change_time
-        if time_since_binance_change < 3.0:
+        if time_since_binance_change < 4.0:
             # Quadratic decay: stay aggressive longer, then transition quickly
             # This allows blend to follow Binance during active movement
-            normalized_time = time_since_binance_change / 3.0
+            normalized_time = time_since_binance_change / 4.0
             decay = normalized_time ** 2  # Quadratic decay
             trust_multiplier = 10.0 - 9.0 * decay  # 10x -> 1x
             R_adaptive = self.R_rtds * trust_multiplier
         else:
-            R_adaptive = self.R_rtds  # Normal trust after 3s of Binance stability
+            R_adaptive = self.R_rtds  # Normal trust after 4s of Binance stability
 
         # Innovation covariance: S = H*P*H' + R
         S = self.P + R_adaptive
@@ -143,7 +143,7 @@ class PriceBlendKalman:
         if self.rtds_observation_count > 10:  # Wait for convergence
             # Check if we should pause bias learning during active price movement
             time_since_change = current_time - self.last_binance_change_time
-            should_learn_bias = not self.pause_bias_learning_during_movement or time_since_change > 3.0
+            should_learn_bias = not self.pause_bias_learning_during_movement or time_since_change > 4.0
 
             if should_learn_bias:
                 # Adaptive learning rate: fast for first 10 seconds, then steady-state
@@ -187,14 +187,14 @@ class PriceBlendKalman:
 
         # Adaptive variance: trust Binance MORE when it's recently changed
         time_since_change = current_time - self.last_binance_change_time
-        if time_since_change < 3.0:
+        if time_since_change < 4.0:
             # Quadratic decay: stay aggressive longer, then transition quickly
-            normalized_time = time_since_change / 3.0
+            normalized_time = time_since_change / 4.0
             decay = normalized_time ** 2  # Quadratic decay
             trust_multiplier = 0.1 + 0.9 * decay  # 0.1x -> 1x
             R_adaptive = self.R_binance * trust_multiplier
         else:
-            R_adaptive = self.R_binance  # Normal trust after 3s of no changes
+            R_adaptive = self.R_binance  # Normal trust after 4s of no changes
 
         # Kalman update with adaptive variance
         S = self.P + R_adaptive
@@ -207,7 +207,7 @@ class PriceBlendKalman:
         if self.binance_observation_count > 50:  # Wait longer for Binance (more observations)
             # Check if we should pause bias learning during active price movement
             time_since_change = current_time - self.last_binance_change_time
-            should_learn_bias = not self.pause_bias_learning_during_movement or time_since_change > 3.0
+            should_learn_bias = not self.pause_bias_learning_during_movement or time_since_change > 4.0
 
             if should_learn_bias:
                 # Adaptive learning rate: fast for first 10 seconds, then steady-state
