@@ -164,7 +164,7 @@ def redeem_position_via_relayer(
     if not condition_id.startswith("0x"):
         condition_id = "0x" + condition_id
 
-    call_data = contract.encodeABI(
+    call_data = contract.encode_abi(
         fn_name="redeemPositions",
         args=[
             USDC_ADDRESS,
