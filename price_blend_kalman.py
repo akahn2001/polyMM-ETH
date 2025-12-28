@@ -29,6 +29,7 @@ class PriceBlendKalman:
         rtds_meas_var: float = 2.0**2,
         binance_meas_var: float = 10.0**2,  # 3x trust in RTDS vs Binance (was 6x with 5.0**2)
         bias_learning_rate: float = 0.02, # was .01
+        pause_bias_learning_during_movement: bool = True,  # Only learn bias during stable periods
     ):
         """
         Parameters
@@ -45,6 +46,9 @@ class PriceBlendKalman:
             Binance measurement noise variance
         bias_learning_rate : float
             How quickly to adapt bias estimates (0 = no learning, 1 = instant)
+        pause_bias_learning_during_movement : bool
+            If True, only update bias during stable periods (>10s since last Binance change)
+            Prevents bias learning from confusing lead/lag dynamics with systematic bias
         """
         self.x = x0  # State estimate (blended price)
         self.P = P0  # State covariance
@@ -65,6 +69,7 @@ class PriceBlendKalman:
         self.bias_alpha_warmup = 0.25  # Fast learning during first 10 seconds
         self.warmup_duration = 10.0  # seconds
         self.warmup_complete = False  # Track if we've logged the transition
+        self.pause_bias_learning_during_movement = pause_bias_learning_during_movement
 
         # Track observations for bias estimation
         self.rtds_observation_count = 0
@@ -124,17 +129,22 @@ class PriceBlendKalman:
         # After state converges, persistent innovation indicates bias
         self.rtds_observation_count += 1
         if self.rtds_observation_count > 10:  # Wait for convergence
-            # Adaptive learning rate: fast for first 10 seconds, then steady-state
-            elapsed = current_time - self.init_time
-            alpha = self.bias_alpha_warmup if elapsed < self.warmup_duration else self.bias_alpha
+            # Check if we should pause bias learning during active price movement
+            time_since_change = current_time - self.last_binance_change_time
+            should_learn_bias = not self.pause_bias_learning_during_movement or time_since_change > 10.0
 
-            # Debug: Log transition from warmup to steady-state (only once)
-            if elapsed >= self.warmup_duration and self.rtds_observation_count == 11:
-                print(f"[KALMAN] RTDS bias learning switched from warmup ({self.bias_alpha_warmup}) to steady-state ({self.bias_alpha}) at {elapsed:.1f}s")
+            if should_learn_bias:
+                # Adaptive learning rate: fast for first 10 seconds, then steady-state
+                elapsed = current_time - self.init_time
+                alpha = self.bias_alpha_warmup if elapsed < self.warmup_duration else self.bias_alpha
 
-            # Only update bias after filter has settled
-            residual = z_rtds - self.x
-            self.rtds_bias = (1 - alpha) * self.rtds_bias + alpha * residual
+                # Debug: Log transition from warmup to steady-state (only once)
+                if elapsed >= self.warmup_duration and self.rtds_observation_count == 11:
+                    print(f"[KALMAN] RTDS bias learning switched from warmup ({self.bias_alpha_warmup}) to steady-state ({self.bias_alpha}) at {elapsed:.1f}s")
+
+                # Only update bias after filter has settled and during stable periods
+                residual = z_rtds - self.x
+                self.rtds_bias = (1 - alpha) * self.rtds_bias + alpha * residual
 
         self.last_update_time = current_time
 
@@ -181,13 +191,18 @@ class PriceBlendKalman:
         # Update bias estimate (EMA of innovations)
         self.binance_observation_count += 1
         if self.binance_observation_count > 50:  # Wait longer for Binance (more observations)
-            # Adaptive learning rate: fast for first 10 seconds, then steady-state
-            elapsed = current_time - self.init_time
-            alpha = self.bias_alpha_warmup if elapsed < self.warmup_duration else self.bias_alpha
+            # Check if we should pause bias learning during active price movement
+            time_since_change = current_time - self.last_binance_change_time
+            should_learn_bias = not self.pause_bias_learning_during_movement or time_since_change > 10.0
 
-            # After filter settles, track systematic bias
-            residual = z_binance - self.x
-            self.binance_bias = (1 - alpha) * self.binance_bias + alpha * residual
+            if should_learn_bias:
+                # Adaptive learning rate: fast for first 10 seconds, then steady-state
+                elapsed = current_time - self.init_time
+                alpha = self.bias_alpha_warmup if elapsed < self.warmup_duration else self.bias_alpha
+
+                # After filter settles, track systematic bias (only during stable periods)
+                residual = z_binance - self.x
+                self.binance_bias = (1 - alpha) * self.binance_bias + alpha * residual
 
         self.last_update_time = current_time
 
