@@ -302,7 +302,7 @@ MAX_IMBALANCE_ADJUSTMENT = 0.015   # max fair value nudge (1 cent)
 EARLY_CANCEL_OPTION_MOVE = .50  # .5 cent option move triggers immediate cancel # TODO: jitter may throw this off
 
 # Coinbase-RTDS z-score threshold (predictive edge detection when using RTDS)
-COINBASE_RTDS_ZSCORE_THRESHOLD = 2.0  # Skip vulnerable side when |z| > 2.0 (95th percentile)
+COINBASE_RTDS_ZSCORE_THRESHOLD = 1.0  # Skip vulnerable side when |z| > 1.0 (84th percentile)
 
 VERBOSE = False
 
