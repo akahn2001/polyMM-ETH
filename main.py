@@ -117,14 +117,18 @@ def update_periodically(client):
                         print(f"[WAITING] RTDS: {rtds_spot:.2f}  CB: {exchange_spot:.2f}  |  Calibrating vol/theo...")
                 elif price_source == "RTDS":
                     if rtds_spot is not None and main_theo is not None and fair_vol is not None:
-                        # Show pure RTDS
-                        print(f"RTDS: {rtds_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
+                        # Show pure RTDS with Coinbase predictor data
+                        z_score = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
+                        cb_price = coinbase_spot if coinbase_spot is not None else 0.0
+                        print(f"RTDS: {rtds_spot:.2f}  CB: {cb_price:.2f}  Z: {z_score:+.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
                     elif rtds_spot is None:
                         # Waiting for RTDS
                         print(f"[WAITING] Waiting for RTDS connection...")
                     elif rtds_spot is not None and (main_theo is None or fair_vol is None):
                         # Waiting for vol/theo calibration
-                        print(f"[WAITING] RTDS: {rtds_spot:.2f}  |  Calibrating vol/theo...")
+                        z_score = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
+                        cb_price = coinbase_spot if coinbase_spot is not None else 0.0
+                        print(f"[WAITING] RTDS: {rtds_spot:.2f}  CB: {cb_price:.2f}  Z: {z_score:+.2f}  |  Calibrating vol/theo...")
                 else:  # BLEND
                     if exchange_spot is not None and blended_spot is not None and main_theo is not None and fair_vol is not None:
                         print(f"RTDS: {rtds_spot:.2f}  BINANCE: {exchange_spot:.2f}  BLEND: {blended_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
