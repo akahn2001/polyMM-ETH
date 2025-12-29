@@ -1,5 +1,5 @@
 import asyncio  # Asynchronous I/O
-import json  # JSON handling
+import orjson  # Fast JSON handling
 import socket  # Socket options for TCP_NODELAY
 import websockets  # WebSocket client
 import traceback  # Exception handling
@@ -54,7 +54,7 @@ async def connect_market_websocket(chunk):
 
                 # Prepare and send subscription message
                 message = {"assets_ids": tokens_to_subscribe}
-                await websocket.send(json.dumps(message))
+                await websocket.send(orjson.dumps(message).decode('utf-8'))
 
                 print("\n")
                 print(f"[WS] Subscribed to {len(tokens_to_subscribe)} market tokens")
@@ -69,7 +69,7 @@ async def connect_market_websocket(chunk):
                     try:
                         # Use timeout so we can check reconnect flag periodically
                         message = await asyncio.wait_for(websocket.recv(), timeout=5.0)
-                        json_data = json.loads(message)
+                        json_data = orjson.loads(message)
                         if type(json_data) != list:
                             json_data = [json_data]
                         process_data(json_data)
@@ -121,7 +121,7 @@ async def connect_user_websocket(key, secret, passphrase):
         }
 
         # Send authentication message
-        await websocket.send(json.dumps(message))
+        await websocket.send(orjson.dumps(message).decode('utf-8'))
 
         print("\n")
         print(f"Sent user subscription message")
@@ -130,7 +130,7 @@ async def connect_user_websocket(key, secret, passphrase):
             # Process incoming user data indefinitely
             while True:
                 message = await websocket.recv()
-                json_data = json.loads(message)
+                json_data = orjson.loads(message)
                 # Process trade and order updates
                 #print(json_data)
                 process_user_data(json_data) # TODO: bring back websocket so can process user data

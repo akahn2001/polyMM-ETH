@@ -1,5 +1,5 @@
 import asyncio
-import json
+import orjson
 import socket
 import time
 import websockets
@@ -42,7 +42,7 @@ def get_binance_btcusdt_mid(verbose=False):
             timeout=5
         )
         response.raise_for_status()
-        data = response.json()
+        data = orjson.loads(response.content)
 
         bid = float(data['bidPrice'])
         ask = float(data['askPrice'])
@@ -83,7 +83,7 @@ def get_usdt_usd_rate(verbose=False):
             timeout=5
         )
         response.raise_for_status()
-        data = response.json()
+        data = orjson.loads(response.content)
 
         # Check for Kraken API errors
         if data.get('error') and len(data['error']) > 0:
@@ -266,7 +266,7 @@ async def stream_binance_btcusdt_mid(on_mid=None, *, verbose=False):
                     print("[BINANCE] connected")
 
                 async for msg in ws:
-                    data = json.loads(msg)
+                    data = orjson.loads(msg)
 
                     # bookTicker fields:
                     # b = best bid price, B = best bid qty, a = best ask price, A = best ask qty
