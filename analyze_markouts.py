@@ -162,6 +162,11 @@ def momentum_analysis(df):
     print("MOMENTUM STRATEGY ANALYSIS")
     print("=" * 80)
 
+    if 'momentum' not in df.columns:
+        print("  ⚠️  momentum not in data - run with updated markouts code")
+        print("     Delete detailed_fills.csv and restart bot to get this data")
+        return
+
     # Correlation
     mom_corr = df['momentum'].corr(df['markout_5s'])
     print(f"Momentum → Markout correlation: {mom_corr:.3f}")
@@ -212,6 +217,11 @@ def theo_value_test(df):
     print("\n" + "=" * 80)
     print("THEO VALUE TEST")
     print("=" * 80)
+
+    if 'edge_vs_theo' not in df.columns:
+        print("  ⚠️  edge_vs_theo not in data - run with updated markouts code")
+        print("     Delete detailed_fills.csv and restart bot to get this data")
+        return
 
     # Edge vs theo correlation with markouts
     edge_corr = df['edge_vs_theo'].corr(df['markout_5s'])
@@ -650,14 +660,16 @@ def maker_vs_taker_analysis(df):
         print(f"  Taker (IOC): {ioc_hit:.1f}%")
 
         # Edge analysis
-        print(f"\nEdge vs theo:")
-        print(f"  Maker avg edge: ${gtc['edge_vs_theo'].mean():.4f}")
-        print(f"  Taker avg edge: ${ioc['edge_vs_theo'].mean():.4f}")
+        if 'edge_vs_theo' in df.columns:
+            print(f"\nEdge vs theo:")
+            print(f"  Maker avg edge: ${gtc['edge_vs_theo'].mean():.4f}")
+            print(f"  Taker avg edge: ${ioc['edge_vs_theo'].mean():.4f}")
 
         # Momentum during fills
-        print(f"\nMomentum during fills:")
-        print(f"  Maker avg |momentum|: ${gtc['momentum'].abs().mean():.2f}")
-        print(f"  Taker avg |momentum|: ${ioc['momentum'].abs().mean():.2f}")
+        if 'momentum' in df.columns:
+            print(f"\nMomentum during fills:")
+            print(f"  Maker avg |momentum|: ${gtc['momentum'].abs().mean():.2f}")
+            print(f"  Taker avg |momentum|: ${ioc['momentum'].abs().mean():.2f}")
 
         # Diagnosis
         print(f"\nDiagnosis:")
