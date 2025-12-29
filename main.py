@@ -87,9 +87,12 @@ def update_periodically(client):
                 blended_spot = global_state.blended_price
 
                 # For display, use the active price source
-                if global_state.USE_COINBASE_PRICE:
+                price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+                if price_source == "COINBASE":
                     exchange_spot = coinbase_spot
-                else:
+                elif price_source == "RTDS":
+                    exchange_spot = rtds_spot
+                else:  # BLEND
                     exchange_spot = binance_spot_usd
 
                 # Get Polymarket order book bid/offer
@@ -102,7 +105,7 @@ def update_periodically(client):
                     pass
 
                 # Only print if we have valid prices
-                if global_state.USE_COINBASE_PRICE:
+                if price_source == "COINBASE":
                     if exchange_spot is not None and main_theo is not None and fair_vol is not None:
                         # Show Coinbase, bias correction, and adjusted price
                         print(f"RTDS: {rtds_spot:.2f}  CB: {exchange_spot:.2f}  BIAS: {coinbase_bias:+.2f}  CB_ADJ: {coinbase_adjusted:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
@@ -112,7 +115,17 @@ def update_periodically(client):
                     elif rtds_spot is not None and exchange_spot is not None and (main_theo is None or fair_vol is None):
                         # Waiting for vol/theo calibration
                         print(f"[WAITING] RTDS: {rtds_spot:.2f}  CB: {exchange_spot:.2f}  |  Calibrating vol/theo...")
-                else:
+                elif price_source == "RTDS":
+                    if rtds_spot is not None and main_theo is not None and fair_vol is not None:
+                        # Show pure RTDS
+                        print(f"RTDS: {rtds_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
+                    elif rtds_spot is None:
+                        # Waiting for RTDS
+                        print(f"[WAITING] Waiting for RTDS connection...")
+                    elif rtds_spot is not None and (main_theo is None or fair_vol is None):
+                        # Waiting for vol/theo calibration
+                        print(f"[WAITING] RTDS: {rtds_spot:.2f}  |  Calibrating vol/theo...")
+                else:  # BLEND
                     if exchange_spot is not None and blended_spot is not None and main_theo is not None and fair_vol is not None:
                         print(f"RTDS: {rtds_spot:.2f}  BINANCE: {exchange_spot:.2f}  BLEND: {blended_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
                     elif exchange_spot is None and rtds_spot is not None:

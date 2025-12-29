@@ -301,6 +301,9 @@ MAX_IMBALANCE_ADJUSTMENT = 0.015   # max fair value nudge (1 cent)
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .50  # .5 cent option move triggers immediate cancel # TODO: jitter may throw this off
 
+# Coinbase-RTDS z-score threshold (predictive edge detection when using RTDS)
+COINBASE_RTDS_ZSCORE_THRESHOLD = 2.0  # Skip vulnerable side when |z| > 2.0 (95th percentile)
+
 VERBOSE = False
 
 
@@ -765,9 +768,11 @@ async def perform_trade(market_id: str):
         momentum = 0.0
 
         # Use appropriate price history based on configuration
-        if global_state.USE_COINBASE_PRICE:
+        price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+        if price_source in ("COINBASE", "RTDS"):
+            # Use Coinbase history for both (RTDS doesn't have its own)
             price_history = global_state.coinbase_price_history
-        else:
+        else:  # BLEND
             price_history = global_state.binance_price_history
 
         if len(price_history) >= 2:
@@ -782,9 +787,12 @@ async def perform_trade(market_id: str):
 
         # Reprice option with momentum-adjusted spot (includes gamma!)
         # Get current spot price and option parameters
-        if global_state.USE_COINBASE_PRICE:
+        price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+        if price_source == "COINBASE":
             S_current = global_state.coinbase_mid_price
-        else:
+        elif price_source == "RTDS":
+            S_current = global_state.mid_price
+        else:  # BLEND
             S_current = global_state.blended_price
 
         sigma = global_state.fair_vol.get(market_id)
@@ -890,9 +898,10 @@ async def perform_trade(market_id: str):
     option_move_mult = 1.0
 
     # Use appropriate price history based on configuration
-    if global_state.USE_COINBASE_PRICE:
+    price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+    if price_source in ("COINBASE", "RTDS"):
         price_history_spread = global_state.coinbase_price_history
-    else:
+    else:  # BLEND
         price_history_spread = global_state.binance_price_history
 
     if len(price_history_spread) >= 2:
@@ -908,9 +917,11 @@ async def perform_trade(market_id: str):
             btc_move = current_price_spread - old_price_spread
 
             # Reprice option at both prices to get option price delta
-            if global_state.USE_COINBASE_PRICE:
+            if price_source == "COINBASE":
                 S_current = global_state.coinbase_mid_price
-            else:
+            elif price_source == "RTDS":
+                S_current = global_state.mid_price
+            else:  # BLEND
                 S_current = global_state.blended_price
             sigma = global_state.fair_vol.get(market_id)
 
@@ -1172,10 +1183,56 @@ async def perform_trade(market_id: str):
             )
 
     # Run both sides in parallel for faster quote updates
-    await asyncio.gather(
-        manage_side("bid"),
-        manage_side("ask")
-    )
+    # Use Coinbase-RTDS z-score to skip vulnerable side when PRICE_SOURCE = "RTDS"
+    price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+
+    if price_source == "RTDS":
+        z = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
+
+        if z > COINBASE_RTDS_ZSCORE_THRESHOLD:
+            # Coinbase HIGH → RTDS will rise → Cancel ASK if exists
+            ask_order = wo.get("ask")
+            if ask_order and isinstance(ask_order, dict) and ask_order.get("id"):
+                if not ask_order.get("cancel_requested"):
+                    print(f"[Z-SCORE] {z:.2f} > {COINBASE_RTDS_ZSCORE_THRESHOLD} → Canceling ASK (RTDS will rise)")
+                    ask_order["cancel_requested"] = True
+                    ask_order["cancel_requested_at"] = time.time()
+                    await cancel_order_async(ask_order["id"])
+                    wo["ask"] = None
+                    # Skip this cycle to prevent race (cancel needs time to process)
+                    return
+
+            # ASK already canceled or doesn't exist - quote BID only
+            await manage_side("bid")
+
+        elif z < -COINBASE_RTDS_ZSCORE_THRESHOLD:
+            # Coinbase LOW → RTDS will fall → Cancel BID if exists
+            bid_order = wo.get("bid")
+            if bid_order and isinstance(bid_order, dict) and bid_order.get("id"):
+                if not bid_order.get("cancel_requested"):
+                    print(f"[Z-SCORE] {z:.2f} < {-COINBASE_RTDS_ZSCORE_THRESHOLD} → Canceling BID (RTDS will fall)")
+                    bid_order["cancel_requested"] = True
+                    bid_order["cancel_requested_at"] = time.time()
+                    await cancel_order_async(bid_order["id"])
+                    wo["bid"] = None
+                    # Skip this cycle to prevent race (cancel needs time to process)
+                    return
+
+            # BID already canceled or doesn't exist - quote ASK only
+            await manage_side("ask")
+
+        else:
+            # Normal spread - quote both sides
+            await asyncio.gather(
+                manage_side("bid"),
+                manage_side("ask")
+            )
+    else:
+        # COINBASE or BLEND mode - always quote both sides
+        await asyncio.gather(
+            manage_side("bid"),
+            manage_side("ask")
+        )
 
 
 def get_protected_mm_order_ids() -> set[str]:

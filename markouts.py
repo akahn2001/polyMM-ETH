@@ -95,11 +95,12 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
         fill_yes = 1.0 - float(price)
         dir_yes  = -1 if side.upper() == "BUY" else +1   # BUY NO makes you shorter YES
 
-    # Capture diagnostic info at time of fill (use Coinbase if USE_COINBASE_PRICE=True, else Binance)
+    # Capture diagnostic info at time of fill
     momentum = 0.0
-    if global_state.USE_COINBASE_PRICE:
+    price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+    if price_source in ("COINBASE", "RTDS"):
         price_history = global_state.coinbase_price_history
-    else:
+    else:  # BLEND
         price_history = global_state.binance_price_history
 
     if len(price_history) >= 2:
@@ -132,9 +133,11 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
 
     # Calculate theo using realized vol instead of implied vol
     realized_vol_theo = None
-    if global_state.USE_COINBASE_PRICE:
+    if price_source == "COINBASE":
         S_current = global_state.coinbase_mid_price
-    else:
+    elif price_source == "RTDS":
+        S_current = global_state.mid_price
+    else:  # BLEND
         S_current = global_state.blended_price
 
     if S_current is not None and realized_vol_15m is not None:
@@ -162,9 +165,11 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
     fair_yes = market_mid if market_mid else 0.0
 
     # Reprice option with momentum (includes gamma, matching trading.py)
-    if global_state.USE_COINBASE_PRICE:
+    if price_source == "COINBASE":
         S_current = global_state.coinbase_mid_price
-    else:
+    elif price_source == "RTDS":
+        S_current = global_state.mid_price
+    else:  # BLEND
         S_current = global_state.blended_price
 
     sigma = global_state.fair_vol.get(market_id)
@@ -203,9 +208,9 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
 
     # Calculate momentum volatility (same logic as trading.py)
     momentum_volatility = 0.0
-    if global_state.USE_COINBASE_PRICE:
+    if price_source in ("COINBASE", "RTDS"):
         price_history_vol = global_state.coinbase_price_history
-    else:
+    else:  # BLEND
         price_history_vol = global_state.binance_price_history
 
     if len(price_history_vol) >= 5:

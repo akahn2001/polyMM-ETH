@@ -10,7 +10,10 @@ from zoneinfo import ZoneInfo
 
 def compute_realized_vol(lookback_minutes: float = 15.0) -> float | None:
     """
-    Calculate annualized realized volatility from price history (Coinbase if USE_COINBASE_PRICE=True, else Binance).
+    Calculate annualized realized volatility from price history.
+
+    Uses Coinbase history for COINBASE and RTDS modes (RTDS doesn't have its own history).
+    Uses Binance history for BLEND mode.
 
     Uses log returns from the price history deque. Returns None if insufficient
     data is available (cold start protection).
@@ -26,11 +29,14 @@ def compute_realized_vol(lookback_minutes: float = 15.0) -> float | None:
         Annualized realized volatility, or None if insufficient data
     """
     # Use appropriate price history based on configuration
-    if global_state.USE_COINBASE_PRICE:
+    price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+
+    if price_source in ("COINBASE", "RTDS"):
+        # Use Coinbase history for both Coinbase and RTDS modes
         if not hasattr(global_state, 'coinbase_price_history'):
             return None
         history = global_state.coinbase_price_history
-    else:
+    else:  # BLEND
         if not hasattr(global_state, 'binance_price_history'):
             return None
         history = global_state.binance_price_history
@@ -131,12 +137,16 @@ def update_fair_vol_for_market(market_id):
     best_bid_px = bids.peekitem(-1)[0]  # highest bid price
     best_ask_px = asks.peekitem(0)[0]   # lowest ask price
 
-    # Get current BTC spot (Coinbase if USE_COINBASE_PRICE=True, else blended)
-    if global_state.USE_COINBASE_PRICE:
+    # Get current BTC spot based on price source
+    price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+
+    if price_source == "COINBASE":
         if global_state.coinbase_mid_price is None:
             return  # No Coinbase price yet
         S = global_state.coinbase_mid_price + global_state.coinbase_bias_correction
-    else:
+    elif price_source == "RTDS":
+        S = global_state.mid_price  # Pure RTDS
+    else:  # BLEND
         S = global_state.blended_price
 
     if S is None:
@@ -174,14 +184,18 @@ def update_fair_vol_for_market(market_id):
 def update_fair_value_for_market(market_id: str):
     """
     Recompute the fair value (theo) of a Polymarket binary for this market_id,
-    using BTC spot price (Coinbase if USE_COINBASE_PRICE=True, else blended) and current fair vol from the Kalman filter.
+    using BTC spot price and current fair vol from the Kalman filter.
     """
-    # 1) Inputs - use Coinbase or blended price based on configuration
-    if global_state.USE_COINBASE_PRICE:
+    # 1) Inputs - pick spot price based on configuration
+    price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+
+    if price_source == "COINBASE":
         if global_state.coinbase_mid_price is None:
             return  # No Coinbase price yet
         S = global_state.coinbase_mid_price + global_state.coinbase_bias_correction  # Bias-corrected Coinbase
-    else:
+    elif price_source == "RTDS":
+        S = global_state.mid_price  # Pure RTDS
+    else:  # BLEND
         S = global_state.blended_price  # Use Kalman blend (Binance + RTDS)
 
     sigma = global_state.fair_vol.get(market_id)

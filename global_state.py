@@ -19,7 +19,8 @@ trading_enabled = False  # Scheduler enables this after configuring first market
 dry_run = False  # Set to False to enable live trading, DO TOGGLE THIS MANUALLY
 
 # Price source configuration
-USE_COINBASE_PRICE = False  # If True, use pure Coinbase mid price; if False, use Kalman blend (Binance/RTDS)
+# Options: "COINBASE" = Coinbase + bias correction, "BLEND" = Kalman blend (Binance/RTDS), "RTDS" = pure RTDS
+PRICE_SOURCE = "RTDS"
 
 # Bot start timestamp (for uptime tracking)
 bot_start_ts = None
@@ -92,6 +93,10 @@ coinbase_mid_ask = None
 # Coinbase bias correction (tracks systematic difference from RTDS)
 coinbase_rtds_spread_history = deque(maxlen=1000)  # Track (timestamp, rtds - coinbase) tuples
 coinbase_bias_correction = 2.0  # Dollars to add to Coinbase for theo (initial assumption: CB is $2 below RTDS)
+
+# Coinbase-RTDS spread z-score tracking (for predictive edge when using RTDS)
+coinbase_rtds_zscore_history = deque(maxlen=500)  # Track (timestamp, coinbase - rtds) for z-score
+coinbase_rtds_zscore = 0.0  # Current z-score: positive = Coinbase high (RTDS will rise), negative = Coinbase low (RTDS will fall)
 
 # Price blending (Kalman filter combining Binance + RTDS)
 price_blend_filter = None

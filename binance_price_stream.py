@@ -157,9 +157,12 @@ def _update_binance_theos(binance_mid_usdt: float):
         option_move = 0.0
 
         # Use appropriate spot price based on configuration
-        if global_state.USE_COINBASE_PRICE:
+        price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+        if price_source == "COINBASE":
             S_current = getattr(global_state, 'coinbase_mid_price', None)  # Using Coinbase
-        else:
+        elif price_source == "RTDS":
+            S_current = getattr(global_state, 'mid_price', None)  # Using RTDS
+        else:  # BLEND
             S_current = getattr(global_state, 'blended_price', None)  # Using blend
 
         exp = getattr(global_state, 'exp', None)
@@ -219,8 +222,9 @@ def _update_binance_theos(binance_mid_usdt: float):
                 update_binance_fair_value_for_market(market_id, binance_mid_usd)
 
                 # Only update main theo and trigger trading if using blend mode
-                # (When USE_COINBASE_PRICE=True, Coinbase + RTDS handle trading triggers)
-                if not global_state.USE_COINBASE_PRICE:
+                # (When using COINBASE or RTDS, those streams handle trading triggers)
+                price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+                if price_source == "BLEND":
                     # Update main theo (uses blended price)
                     if update_fair_value_for_market is not None:
                         update_fair_value_for_market(market_id)

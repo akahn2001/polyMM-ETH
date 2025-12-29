@@ -21,6 +21,54 @@ def _set_tcp_nodelay(ws):
         pass
 
 
+def _update_coinbase_rtds_zscore(coinbase_mid_usd: float):
+    """
+    Calculate z-score of Coinbase-RTDS spread for predictive edge detection.
+
+    Z-score > +2.0: Coinbase HIGH relative to RTDS → RTDS will rise → Keep BID, cancel ASK
+    Z-score < -2.0: Coinbase LOW relative to RTDS → RTDS will fall → Keep ASK, cancel BID
+
+    Parameters
+    ----------
+    coinbase_mid_usd : float
+        Current Coinbase BTC/USD mid price
+    """
+    rtds_price = global_state.mid_price
+
+    if rtds_price is None:
+        return  # Can't calculate spread without RTDS price
+
+    # Calculate spread (Coinbase - RTDS)
+    spread = coinbase_mid_usd - rtds_price
+    now = time.time()
+
+    # Store spread in history
+    global_state.coinbase_rtds_zscore_history.append((now, spread))
+
+    # Calculate z-score from recent window
+    LOOKBACK_SECONDS = 5 * 60  # 5 minutes
+    MIN_SAMPLES = 30           # Need 30+ samples for valid stats
+    MIN_STD_DEV = 0.10         # Ignore if spread too stable ($0.10 threshold)
+
+    cutoff_time = now - LOOKBACK_SECONDS
+    recent_spreads = [s for (ts, s) in global_state.coinbase_rtds_zscore_history if ts >= cutoff_time]
+
+    if len(recent_spreads) >= MIN_SAMPLES:
+        import numpy as np
+        mean = np.mean(recent_spreads)
+        std = np.std(recent_spreads)
+
+        if std > MIN_STD_DEV:
+            # Valid signal - calculate z-score
+            global_state.coinbase_rtds_zscore = (spread - mean) / std
+        else:
+            # Spread too stable - no predictive signal
+            global_state.coinbase_rtds_zscore = 0.0
+    else:
+        # Not enough data yet - cold start
+        global_state.coinbase_rtds_zscore = 0.0
+
+
 from util import update_binance_fair_value_for_market, update_fair_value_for_market, bs_binary_call, update_realized_vol
 from trading import perform_trade, MIN_ORDER_INTERVAL, cancel_order_async, EARLY_CANCEL_OPTION_MOVE
 
@@ -56,9 +104,12 @@ def _update_coinbase_theos(coinbase_mid_usd: float):
         option_move = 0.0
 
         # Use appropriate spot price based on configuration
-        if global_state.USE_COINBASE_PRICE:
+        price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+        if price_source == "COINBASE":
             S_current = coinbase_mid_usd  # Using pure Coinbase
-        else:
+        elif price_source == "RTDS":
+            S_current = getattr(global_state, 'mid_price', None)  # Using RTDS
+        else:  # BLEND
             S_current = getattr(global_state, 'blended_price', None)  # Using blend
 
         exp = getattr(global_state, 'exp', None)
@@ -105,9 +156,13 @@ def _update_coinbase_theos(coinbase_mid_usd: float):
     # Update realized vol estimates (5m and 15m) - use Coinbase history if enabled
     update_realized_vol()
 
+    # Calculate Coinbase-RTDS spread z-score (predictive signal for RTDS mode)
+    _update_coinbase_rtds_zscore(coinbase_mid_usd)
+
     # Update fair value for all BTC markets and trigger trading
     # Only trigger if Coinbase is the primary price source
-    if global_state.USE_COINBASE_PRICE and hasattr(global_state, 'btc_markets'):
+    price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+    if price_source == "COINBASE" and hasattr(global_state, 'btc_markets'):
         for market_id in global_state.btc_markets:
             try:
                 # Update main theo (uses Coinbase price)
