@@ -269,7 +269,7 @@ SKEW_CAP = 0.04       # max skew in price points (5c)
 
 MIN_PRICE = 0.01
 MAX_PRICE = 0.99
-PRICE_MOVE_TOL = 0.0025          # don't cancel/replace if existing quote is within 0.5c of target
+PRICE_MOVE_TOL = 0.0030          # don't cancel/replace if existing quote is within 0.5c of target
 TICK_SIZE = .01
 MIN_TICKS_BUILD = 1.0   # ticks from touch when building position (more conservative)
 MIN_TICKS_REDUCE = 1.0   # ticks from touch when reducing position (want to get filled)
