@@ -263,7 +263,7 @@ EDGE_TAKE_THRESHOLD = 2.0      # edge to justify crossing when OPENING position
 EDGE_TAKE_THRESHOLD_REDUCE = 2.0  # lower threshold when REDUCING position (closing risk is more valuable)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 10             # max size for IOC orders that reduce position (also capped by position size)
-BASE_QUOTE_SPREAD = 0.030             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
+BASE_QUOTE_SPREAD = 0.035             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 10
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
@@ -273,13 +273,13 @@ SKEW_CAP = 0.04       # max skew in price points (5c)
 
 MIN_PRICE = 0.01
 MAX_PRICE = 0.99
-PRICE_MOVE_TOL = 0.0030          # don't cancel/replace if existing quote is within 0.5c of target
+PRICE_MOVE_TOL = 0.0025          # don't cancel/replace if existing quote is within 0.5c of target
 TICK_SIZE = .01
 MIN_TICKS_BUILD = 1.0   # ticks from touch when building position (more conservative)
 MIN_TICKS_REDUCE = 1.0   # ticks from touch when reducing position (want to get filled)
 MIN_EDGE_TO_QUOTE = 0.02  # minimum edge (in price points) required to quote a side
 
-MIN_ORDER_INTERVAL = .50  # seconds → max 5 orders/sec per market+side, # changed this back to 1
+MIN_ORDER_INTERVAL = 1.0  # seconds → max 5 orders/sec per market+side, # changed this back to 1
 POST_FILL_COOLDOWN = 2.0  # seconds to pause quoting on a side after getting filled (GTC only)
 
 # Binance momentum adjustment
@@ -296,7 +296,7 @@ MAX_OPTION_SPREAD_MULT = 3.0      # Max spread multiplier cap (was 4.0)
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = 0.02   # max fair value nudge (1 cent)
+MAX_IMBALANCE_ADJUSTMENT = 0.015   # max fair value nudge (1 cent)
 
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .50  # .5 cent option move triggers immediate cancel # TODO: jitter may throw this off
@@ -756,7 +756,7 @@ async def perform_trade(market_id: str):
     # Blend theo (75%) with book mid (25%) for quoting
     # Theo reacts to spot price (Coinbase or blend), book mid anchors to market reality
     theo = info["fair"]  # global_state.fair_value[market_id]
-    fair_yes = 0.70 * theo + 0.30 * book_mid
+    fair_yes = 0.50 * theo + 0.50 * book_mid
 
     # Add momentum adjustment if enabled (uses Coinbase if USE_COINBASE_PRICE=True, else Binance)
     if not USE_BINANCE_MOMENTUM:
