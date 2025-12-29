@@ -396,11 +396,15 @@ async def main():
              #   connect_user_websocket()
             #)
             # Select which exchange stream to use based on configuration
-            if global_state.USE_COINBASE_PRICE:
-                # Coinbase mode: RTDS + Coinbase trigger trades, no need for Binance
+            price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+            if price_source == "COINBASE":
+                # Coinbase mode: RTDS + Coinbase trigger trades
                 exchange_stream = stream_coinbase_btcusd_mid(verbose=False)
-            else:
-                # Blend mode: RTDS + Binance trigger trades, no need for Coinbase
+            elif price_source == "RTDS":
+                # RTDS mode: RTDS triggers trades, Coinbase used for z-score predictor
+                exchange_stream = stream_coinbase_btcusd_mid(verbose=False)
+            else:  # BLEND
+                # Blend mode: RTDS + Binance trigger trades
                 exchange_stream = stream_binance_btcusdt_mid(verbose=False)
 
             await asyncio.gather(
