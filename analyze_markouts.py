@@ -462,6 +462,11 @@ def realized_vol_theo_analysis(df):
         print("  ⚠️  No realized vol theo data available (cold start period)")
         return
 
+    if 'edge_vs_theo' not in df.columns:
+        print("  ⚠️  edge_vs_theo not in data - run with updated markouts code")
+        print("     Delete detailed_fills.csv and restart bot to get this data")
+        return
+
     print(f"Fills with vol data: {len(df_vol)} / {len(df)}")
 
     # Calculate edge vs realized vol theo
@@ -703,22 +708,24 @@ def summary_and_diagnosis(df):
         issues.append("✅ PROFITABLE: Positive avg markout")
 
     # Check delta
-    if df['delta'].mean() < 0.00001:
+    if 'delta' in df.columns and df['delta'].mean() < 0.00001:
         issues.append("❌ CRITICAL: Delta near zero - momentum not working!")
 
     # Check momentum correlation
-    mom_corr = df['momentum'].corr(df['markout_5s'])
-    if mom_corr < 0:
-        issues.append("❌ Negative momentum correlation - strategy backwards?")
-    elif mom_corr < 0.05:
-        issues.append("⚠️  Weak momentum correlation - edge unclear")
+    if 'momentum' in df.columns:
+        mom_corr = df['momentum'].corr(df['markout_5s'])
+        if mom_corr < 0:
+            issues.append("❌ Negative momentum correlation - strategy backwards?")
+        elif mom_corr < 0.05:
+            issues.append("⚠️  Weak momentum correlation - edge unclear")
 
     # Check theo value
-    theo_corr = df['edge_vs_theo'].corr(df['markout_5s'])
-    if theo_corr < 0:
-        issues.append("❌ Theo has negative correlation - model is wrong")
-    elif theo_corr > 0.15:
-        issues.append("✅ Theo has value - model is predictive")
+    if 'edge_vs_theo' in df.columns:
+        theo_corr = df['edge_vs_theo'].corr(df['markout_5s'])
+        if theo_corr < 0:
+            issues.append("❌ Theo has negative correlation - model is wrong")
+        elif theo_corr > 0.15:
+            issues.append("✅ Theo has value - model is predictive")
 
     # Check adverse selection
     hit_rate = (df['markout_5s'] > 0).sum() / len(df) * 100
