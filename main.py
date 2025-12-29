@@ -107,9 +107,21 @@ def update_periodically(client):
                     if exchange_spot is not None and main_theo is not None and fair_vol is not None:
                         # Show Coinbase, bias correction, and adjusted price
                         print(f"RTDS: {rtds_spot:.2f}  CB: {exchange_spot:.2f}  BIAS: {bias:+.2f}  CB_ADJ: {coinbase_adjusted:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
+                    elif exchange_spot is None and rtds_spot is not None:
+                        # Waiting for Coinbase price
+                        print(f"[WAITING] RTDS connected ({rtds_spot:.2f}), waiting for Coinbase price...")
+                    elif main_theo is None or fair_vol is None:
+                        # Waiting for vol/theo calibration
+                        print(f"[WAITING] RTDS: {rtds_spot:.2f}  CB: {exchange_spot:.2f}  |  Calibrating vol/theo...")
                 else:
                     if exchange_spot is not None and blended_spot is not None and main_theo is not None and fair_vol is not None:
                         print(f"RTDS: {rtds_spot:.2f}  BINANCE: {exchange_spot:.2f}  BLEND: {blended_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
+                    elif exchange_spot is None and rtds_spot is not None:
+                        # Waiting for Binance price
+                        print(f"[WAITING] RTDS connected ({rtds_spot:.2f}), waiting for Binance price...")
+                    elif main_theo is None or fair_vol is None:
+                        # Waiting for vol/theo calibration
+                        print(f"[WAITING] RTDS: {rtds_spot:.2f}  BINANCE: {exchange_spot:.2f}  BLEND: {blended_spot:.2f}  |  Calibrating vol/theo...")
 
                 # Get realized vol from global state
                 realized_vol_5m = global_state.realized_vol_5m
