@@ -110,7 +110,7 @@ def update_periodically(client):
                     elif exchange_spot is None and rtds_spot is not None:
                         # Waiting for Coinbase price
                         print(f"[WAITING] RTDS connected ({rtds_spot:.2f}), waiting for Coinbase price...")
-                    elif main_theo is None or fair_vol is None:
+                    elif rtds_spot is not None and exchange_spot is not None and (main_theo is None or fair_vol is None):
                         # Waiting for vol/theo calibration
                         print(f"[WAITING] RTDS: {rtds_spot:.2f}  CB: {exchange_spot:.2f}  |  Calibrating vol/theo...")
                 else:
@@ -119,7 +119,7 @@ def update_periodically(client):
                     elif exchange_spot is None and rtds_spot is not None:
                         # Waiting for Binance price
                         print(f"[WAITING] RTDS connected ({rtds_spot:.2f}), waiting for Binance price...")
-                    elif main_theo is None or fair_vol is None:
+                    elif rtds_spot is not None and exchange_spot is not None and blended_spot is not None and (main_theo is None or fair_vol is None):
                         # Waiting for vol/theo calibration
                         print(f"[WAITING] RTDS: {rtds_spot:.2f}  BINANCE: {exchange_spot:.2f}  BLEND: {blended_spot:.2f}  |  Calibrating vol/theo...")
 
