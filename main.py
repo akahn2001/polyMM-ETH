@@ -53,7 +53,7 @@ def update_periodically(client):
     # Open CSV file for logging
     csv_file = open("theo_comparison.csv", "w", newline="")
     csv_writer = csv.writer(csv_file)
-    csv_writer.writerow(["timestamp", "rtds_spot", "binance_spot_usd", "blended_spot", "blended_theo", "binance_theo", "fair_vol", "market_bid", "market_offer", "market_mid", "realized_vol_5m", "realized_vol_15m"])
+    csv_writer.writerow(["timestamp", "rtds_spot", "coinbase_spot", "coinbase_bias", "coinbase_adjusted", "binance_spot_usd", "blended_spot", "theo", "fair_vol", "market_bid", "market_offer", "market_mid", "realized_vol_5m", "realized_vol_15m"])
 
     while True:
         #print(global_state.working_orders_by_market)
@@ -79,19 +79,18 @@ def update_periodically(client):
                 rtds_spot = global_state.mid_price
                 fair_vol = global_state.fair_vol.get(market_id)
 
-                # Get prices based on which mode we're in
+                # Get all price data (log everything regardless of mode)
+                coinbase_spot = global_state.coinbase_mid_price
+                coinbase_bias = global_state.coinbase_bias_correction
+                coinbase_adjusted = coinbase_spot + coinbase_bias if coinbase_spot is not None else None
+                binance_spot_usd = global_state.binance_mid_price * global_state.usdtusd if global_state.binance_mid_price else None
+                blended_spot = global_state.blended_price
+
+                # For display, use the active price source
                 if global_state.USE_COINBASE_PRICE:
-                    coinbase_spot = global_state.coinbase_mid_price
-                    bias = global_state.coinbase_bias_correction
-                    coinbase_adjusted = coinbase_spot + bias if coinbase_spot is not None else None
                     exchange_spot = coinbase_spot
-                    blended_spot = None  # Not used in Coinbase mode
                 else:
-                    binance_spot_usd = global_state.binance_mid_price * global_state.usdtusd if global_state.binance_mid_price else None
                     exchange_spot = binance_spot_usd
-                    blended_spot = global_state.blended_price
-                    bias = None
-                    coinbase_adjusted = None
 
                 # Get Polymarket order book bid/offer
                 market_bid, market_offer = None, None
@@ -106,7 +105,7 @@ def update_periodically(client):
                 if global_state.USE_COINBASE_PRICE:
                     if exchange_spot is not None and main_theo is not None and fair_vol is not None:
                         # Show Coinbase, bias correction, and adjusted price
-                        print(f"RTDS: {rtds_spot:.2f}  CB: {exchange_spot:.2f}  BIAS: {bias:+.2f}  CB_ADJ: {coinbase_adjusted:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
+                        print(f"RTDS: {rtds_spot:.2f}  CB: {exchange_spot:.2f}  BIAS: {coinbase_bias:+.2f}  CB_ADJ: {coinbase_adjusted:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
                     elif exchange_spot is None and rtds_spot is not None:
                         # Waiting for Coinbase price
                         print(f"[WAITING] RTDS connected ({rtds_spot:.2f}), waiting for Coinbase price...")
@@ -127,11 +126,24 @@ def update_periodically(client):
                 realized_vol_5m = global_state.realized_vol_5m
                 realized_vol_15m = global_state.realized_vol_15m
 
-                # Write to CSV (handle both modes)
-                if global_state.USE_COINBASE_PRICE:
-                    csv_writer.writerow([current_time, rtds_spot, exchange_spot, None, main_theo, None, fair_vol, market_bid, market_offer, market_mid, realized_vol_5m, realized_vol_15m])
-                else:
-                    csv_writer.writerow([current_time, rtds_spot, exchange_spot, blended_spot, main_theo, None, fair_vol, market_bid, market_offer, market_mid, realized_vol_5m, realized_vol_15m])
+                # Write to CSV - always log all data regardless of mode
+                # Columns: timestamp, rtds_spot, coinbase_spot, coinbase_bias, coinbase_adjusted, binance_spot_usd, blended_spot, theo, fair_vol, market_bid, market_offer, market_mid, realized_vol_5m, realized_vol_15m
+                csv_writer.writerow([
+                    current_time,
+                    rtds_spot,
+                    coinbase_spot,
+                    coinbase_bias,
+                    coinbase_adjusted,
+                    binance_spot_usd,
+                    blended_spot,
+                    main_theo,
+                    fair_vol,
+                    market_bid,
+                    market_offer,
+                    market_mid,
+                    realized_vol_5m,
+                    realized_vol_15m
+                ])
                 csv_file.flush()  # Ensure data is written immediately
 
         time.sleep(0.5)

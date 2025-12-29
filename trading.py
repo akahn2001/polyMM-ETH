@@ -263,7 +263,7 @@ EDGE_TAKE_THRESHOLD = 2.0      # edge to justify crossing when OPENING position
 EDGE_TAKE_THRESHOLD_REDUCE = 2.0  # lower threshold when REDUCING position (closing risk is more valuable)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 10             # max size for IOC orders that reduce position (also capped by position size)
-BASE_QUOTE_SPREAD = 0.035             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
+BASE_QUOTE_SPREAD = 0.040             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 10
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
@@ -280,7 +280,7 @@ MIN_TICKS_REDUCE = 1.0   # ticks from touch when reducing position (want to get 
 MIN_EDGE_TO_QUOTE = 0.02  # minimum edge (in price points) required to quote a side
 
 MIN_ORDER_INTERVAL = 1.0  # seconds → max 5 orders/sec per market+side, # changed this back to 1
-POST_FILL_COOLDOWN = 2.0  # seconds to pause quoting on a side after getting filled (GTC only)
+POST_FILL_COOLDOWN = 1.0  # seconds to pause quoting on a side after getting filled (GTC only)
 
 # Binance momentum adjustment
 USE_BINANCE_MOMENTUM = False  # Toggle to use Binance momentum for predictive quoting

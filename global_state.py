@@ -19,7 +19,7 @@ trading_enabled = False  # Scheduler enables this after configuring first market
 dry_run = False  # Set to False to enable live trading, DO TOGGLE THIS MANUALLY
 
 # Price source configuration
-USE_COINBASE_PRICE = True  # If True, use pure Coinbase mid price; if False, use Kalman blend (Binance/RTDS)
+USE_COINBASE_PRICE = False  # If True, use pure Coinbase mid price; if False, use Kalman blend (Binance/RTDS)
 
 # Bot start timestamp (for uptime tracking)
 bot_start_ts = None
