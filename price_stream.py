@@ -151,7 +151,7 @@ async def stream_btc_usd():
                             for market_id in global_state.btc_markets:
                                 update_fair_value_for_market(market_id)
                                 asyncio.create_task(perform_trade(market_id))
-                    except json.JSONDecodeError:
+                    except (orjson.JSONDecodeError, ValueError):
                         # Might be "PONG" or some non-JSON message
                         continue
 
