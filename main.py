@@ -277,6 +277,10 @@ async def main():
     Main application entry point. Initializes client, data, and manages websocket connections.
     """
     print("starting")
+
+    # Initialize position check lock (prevents race condition in concurrent order placement)
+    global_state.position_check_lock = asyncio.Lock()
+
     # Initialize client
     client = PolymarketClient()
     global_state.client = client

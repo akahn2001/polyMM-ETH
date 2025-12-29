@@ -1,4 +1,5 @@
 import threading
+import asyncio
 import pandas as pd
 import json
 import ast
@@ -8,6 +9,10 @@ from zoneinfo import ZoneInfo
 from dataclasses import dataclass, field
 
 USER_OWNER_ID = "36e9b72d-fb6b-151f-0ad7-869f32584268"
+
+# Position check lock - prevents race condition where multiple concurrent tasks place orders
+# Must be initialized in async context, not at module level
+position_check_lock = None
 
 # Shadow trading flag
 trading_enabled = False  # Scheduler enables this after configuring first market, DO NOT TOGGLE THIS MANUALLY

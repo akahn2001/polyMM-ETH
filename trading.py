@@ -327,166 +327,171 @@ async def send_order(token_id: str, side: str, price: float, size: float, tif: s
     side = side.upper()
     tif = tif.upper()
 
-    # Start new blocker
+    # Start new blocker - use lock to prevent race condition
+    # Multiple concurrent perform_trade() tasks can call send_order() simultaneously,
+    # all seeing the same position state before any orders are placed.
+    # The lock ensures only one order is checked and placed at a time.
 
     if market_id is None:
         # If you ever call send_order without market_id, safest is to block
         #print("[RISK] send_order called without market_id; blocking to enforce MAX_POSITION.")
         return None
 
-    try:
-        yes_token = global_state.condition_to_token_id[market_id]
-        no_token = global_state.REVERSE_TOKENS[yes_token]
+    # Acquire lock before checking position
+    async with global_state.position_check_lock:
+        try:
+            yes_token = global_state.condition_to_token_id[market_id]
+            no_token = global_state.REVERSE_TOKENS[yes_token]
 
-        # filled net YES - this is the ACTUAL position from confirmed fills
-        pos_obj = global_state.positions_by_market.get(market_id)
-        filled_yes = pos_obj.net_yes if pos_obj is not None else 0.0
+            # filled net YES - this is the ACTUAL position from confirmed fills
+            pos_obj = global_state.positions_by_market.get(market_id)
+            filled_yes = pos_obj.net_yes if pos_obj is not None else 0.0
 
-        # pending net YES from working_orders_by_market (GTC orders)
-        # ONLY count orders that INCREASE absolute position (consume limit headroom)
-        # Do NOT count orders that reduce position (they shouldn't create phantom headroom)
-        pending_yes = 0.0
-        wo = getattr(global_state, "working_orders_by_market", {}).get(market_id, {})
-        for side_key in ("bid", "ask"):
-            entry = wo.get(side_key)
-            if not isinstance(entry, dict):
-                continue
-            tok = entry.get("token")
-            sde = (entry.get("side") or "").upper()
-            qty = float(entry.get("size") or 0.0)
-            if qty <= 0:
-                continue
+            # pending net YES from working_orders_by_market (GTC orders)
+            # ONLY count orders that INCREASE absolute position (consume limit headroom)
+            # Do NOT count orders that reduce position (they shouldn't create phantom headroom)
+            pending_yes = 0.0
+            wo = getattr(global_state, "working_orders_by_market", {}).get(market_id, {})
+            for side_key in ("bid", "ask"):
+                entry = wo.get(side_key)
+                if not isinstance(entry, dict):
+                    continue
+                tok = entry.get("token")
+                sde = (entry.get("side") or "").upper()
+                qty = float(entry.get("size") or 0.0)
+                if qty <= 0:
+                    continue
 
-            # Calculate delta for this pending order
-            if tok == yes_token:
-                order_delta = qty if sde == "BUY" else -qty
-            elif tok == no_token:
-                order_delta = -qty if sde == "BUY" else +qty
+                # Calculate delta for this pending order
+                if tok == yes_token:
+                    order_delta = qty if sde == "BUY" else -qty
+                elif tok == no_token:
+                    order_delta = -qty if sde == "BUY" else +qty
+                else:
+                    continue
+
+                # Only count if this order would INCREASE absolute position
+                # (i.e., pushes position further from zero in the same direction)
+                if filled_yes >= 0 and order_delta > 0:
+                    # Long position, order adds more long → count it
+                    pending_yes += order_delta
+                elif filled_yes <= 0 and order_delta < 0:
+                    # Short position, order adds more short → count it
+                    pending_yes += order_delta
+                # Otherwise: order reduces position, don't count (no phantom headroom)
+
+            # Include pending_order_delta (tracks in-flight IOC orders)
+            # Delta is added when IOC order is placed, removed when TRADE event confirms fill
+            pending_delta = getattr(global_state, "pending_order_delta", {}).get(market_id, 0.0)
+            effective_yes = filled_yes + pending_yes + pending_delta
+
+            # delta from THIS order
+            if token_id == yes_token:
+                delta_yes = +size if side == "BUY" else -size
+            elif token_id == no_token:
+                delta_yes = -size if side == "BUY" else +size
             else:
-                continue
+                #print(f"[RISK] token_id not recognized for market {market_id}; blocking.")
+                return None
 
-            # Only count if this order would INCREASE absolute position
-            # (i.e., pushes position further from zero in the same direction)
-            if filled_yes >= 0 and order_delta > 0:
-                # Long position, order adds more long → count it
-                pending_yes += order_delta
-            elif filled_yes <= 0 and order_delta < 0:
-                # Short position, order adds more short → count it
-                pending_yes += order_delta
-            # Otherwise: order reduces position, don't count (no phantom headroom)
+            projected = effective_yes + delta_yes
 
-        # Include pending_order_delta (tracks in-flight IOC orders)
-        # Delta is added when IOC order is placed, removed when TRADE event confirms fill
-        pending_delta = getattr(global_state, "pending_order_delta", {}).get(market_id, 0.0)
-        effective_yes = filled_yes + pending_yes + pending_delta
+            # If already beyond limit, only allow orders that REDUCE absolute exposure
+            if abs(effective_yes) > MAX_POSITION:
+                if abs(projected) >= abs(effective_yes):
+                    #print(
+                     #   f"[RISK] Blocked (not reducing): eff_yes={effective_yes:.1f} delta={delta_yes:.1f} proj={projected:.1f} MAX={MAX_POSITION}")
+                    return None
+            else:
+                # Normal case: inside band -> don't allow crossing out
+                if abs(projected) > MAX_POSITION:
+                    #print(
+                     #   f"[RISK] Blocked: eff_yes={effective_yes:.1f} delta={delta_yes:.1f} proj={projected:.1f} MAX={MAX_POSITION}")
+                    return None
 
-        # delta from THIS order
-        if token_id == yes_token:
-            delta_yes = +size if side == "BUY" else -size
-        elif token_id == no_token:
-            delta_yes = -size if side == "BUY" else +size
+        except Exception as e:
+            # Fail-safe: if we can't compute risk, don't trade.
+            #print(f"[RISK] Could not compute projected position; blocking order. err={e}")
+            return None
+        # End new blocker
+
+        # 1) Throttle by (key, side, tif)
+        # Use token_id as part of key so YES and NO are throttled separately
+        if market_id is not None:
+            key = (market_id, token_id, side, tif)
         else:
-            #print(f"[RISK] token_id not recognized for market {market_id}; blocking.")
+            key = (token_id, side, tif)
+
+        now = time.time()
+        last = global_state.last_order_time.get(key, 0.0)
+
+        if now - last < MIN_ORDER_INTERVAL:
+            # Too soon; skip sending
+            # print(f"[THROTTLE] {side} {key_id} {tif}: {now - last:.3f}s since last order (min {MIN_ORDER_INTERVAL}s)")
             return None
 
-        projected = effective_yes + delta_yes
+        # Update timestamp BEFORE sending to clip bursts
+        global_state.last_order_time[key] = now
 
-        # If already beyond limit, only allow orders that REDUCE absolute exposure
-        if abs(effective_yes) > MAX_POSITION:
-            if abs(projected) >= abs(effective_yes):
-                #print(
-                 #   f"[RISK] Blocked (not reducing): eff_yes={effective_yes:.1f} delta={delta_yes:.1f} proj={projected:.1f} MAX={MAX_POSITION}")
-                return None
-        else:
-            # Normal case: inside band -> don't allow crossing out
-            if abs(projected) > MAX_POSITION:
-                #print(
-                 #   f"[RISK] Blocked: eff_yes={effective_yes:.1f} delta={delta_yes:.1f} proj={projected:.1f} MAX={MAX_POSITION}")
-                return None
+        # Track pending order delta BEFORE placing order (for IOC orders only - GTC tracked in working_orders)
+        order_delta = 0.0
+        if tif == "IOC":
+            if not hasattr(global_state, "pending_order_delta"):
+                global_state.pending_order_delta = {}
+            if market_id not in global_state.pending_order_delta:
+                global_state.pending_order_delta[market_id] = 0.0
+            if not hasattr(global_state, "ioc_order_deltas"):
+                global_state.ioc_order_deltas = {}  # {order_id: (market_id, delta, timestamp)}
 
-    except Exception as e:
-        # Fail-safe: if we can't compute risk, don't trade.
-        #print(f"[RISK] Could not compute projected position; blocking order. err={e}")
-        return None
-    # End new blocker
+            # Calculate delta for this order
+            yes_token = global_state.condition_to_token_id.get(market_id)
+            no_token = global_state.REVERSE_TOKENS.get(yes_token) if yes_token else None
+            if token_id == yes_token:
+                order_delta = +size if side == "BUY" else -size
+            elif token_id == no_token:
+                order_delta = -size if side == "BUY" else +size
 
-    # 1) Throttle by (key, side, tif)
-    # Use token_id as part of key so YES and NO are throttled separately
-    if market_id is not None:
-        key = (market_id, token_id, side, tif)
-    else:
-        key = (token_id, side, tif)
+            # Add to pending delta BEFORE placing order
+            global_state.pending_order_delta[market_id] += order_delta
 
-    now = time.time()
-    last = global_state.last_order_time.get(key, 0.0)
+        # 2) DRY RUN mode – only print what we *would* do
+        if getattr(global_state, "dry_run", False):
+            print(f"[DRY_RUN] Would place {tif} {side} {size} @ {price:.4f} on token {token_id} (market={market_id})")
+            return "DRY_RUN"
 
-    if now - last < MIN_ORDER_INTERVAL:
-        # Too soon; skip sending
-        # print(f"[THROTTLE] {side} {key_id} {tif}: {now - last:.3f}s since last order (min {MIN_ORDER_INTERVAL}s)")
-        return None
+        # 3) Real order – use create_order(token_id, ...) directly
+        try:
+            order_id = await asyncio.to_thread(
+                client.create_order,   # NOTE: token-level
+                token_id,
+                side,
+                price,
+                size,
+                tif,
+            )
+            # Track IOC order_id -> delta mapping for position tracking
+            if tif == "IOC" and order_delta != 0.0 and order_id:
+                global_state.ioc_order_deltas[order_id] = (market_id, order_delta, now)
+            #print(f"[SEND_ORDER] Placed {tif} {side} {size} @ {price:.4f} on token {token_id} (market={market_id}) -> {order_id}")
+            return order_id
 
-    # Update timestamp BEFORE sending to clip bursts
-    global_state.last_order_time[key] = now
-
-    # Track pending order delta BEFORE placing order (for IOC orders only - GTC tracked in working_orders)
-    order_delta = 0.0
-    if tif == "IOC":
-        if not hasattr(global_state, "pending_order_delta"):
-            global_state.pending_order_delta = {}
-        if market_id not in global_state.pending_order_delta:
-            global_state.pending_order_delta[market_id] = 0.0
-        if not hasattr(global_state, "ioc_order_deltas"):
-            global_state.ioc_order_deltas = {}  # {order_id: (market_id, delta, timestamp)}
-
-        # Calculate delta for this order
-        yes_token = global_state.condition_to_token_id.get(market_id)
-        no_token = global_state.REVERSE_TOKENS.get(yes_token) if yes_token else None
-        if token_id == yes_token:
-            order_delta = +size if side == "BUY" else -size
-        elif token_id == no_token:
-            order_delta = -size if side == "BUY" else +size
-
-        # Add to pending delta BEFORE placing order
-        global_state.pending_order_delta[market_id] += order_delta
-
-    # 2) DRY RUN mode – only print what we *would* do
-    if getattr(global_state, "dry_run", False):
-        print(f"[DRY_RUN] Would place {tif} {side} {size} @ {price:.4f} on token {token_id} (market={market_id})")
-        return "DRY_RUN"
-
-    # 3) Real order – use create_order(token_id, ...) directly
-    try:
-        order_id = await asyncio.to_thread(
-            client.create_order,   # NOTE: token-level
-            token_id,
-            side,
-            price,
-            size,
-            tif,
-        )
-        # Track IOC order_id -> delta mapping for position tracking
-        if tif == "IOC" and order_delta != 0.0 and order_id:
-            global_state.ioc_order_deltas[order_id] = (market_id, order_delta, now)
-        #print(f"[SEND_ORDER] Placed {tif} {side} {size} @ {price:.4f} on token {token_id} (market={market_id}) -> {order_id}")
-        return order_id
-
-    except PolyApiException as e:
-        # Revert pending delta on failure (IOC only)
-        if order_delta != 0.0:
-            global_state.pending_order_delta[market_id] -= order_delta
-        if e.status_code == 401:
-            print(f"[SEND_ORDER] 401 Unauthorized - refreshing credentials...")
-            try:
-                global_state.client.refresh_creds()
-            except Exception as refresh_err:
-                print(f"[SEND_ORDER] Failed to refresh creds: {refresh_err}")
-        return None
-    except Exception as e:
-        # Revert pending delta on failure (IOC only)
-        if order_delta != 0.0:
-            global_state.pending_order_delta[market_id] -= order_delta
-        #print(f"[SEND_ORDER][ERROR] Unexpected exception: {e}")
-        return None
+        except PolyApiException as e:
+            # Revert pending delta on failure (IOC only)
+            if order_delta != 0.0:
+                global_state.pending_order_delta[market_id] -= order_delta
+            if e.status_code == 401:
+                print(f"[SEND_ORDER] 401 Unauthorized - refreshing credentials...")
+                try:
+                    global_state.client.refresh_creds()
+                except Exception as refresh_err:
+                    print(f"[SEND_ORDER] Failed to refresh creds: {refresh_err}")
+            return None
+        except Exception as e:
+            # Revert pending delta on failure (IOC only)
+            if order_delta != 0.0:
+                global_state.pending_order_delta[market_id] -= order_delta
+            #print(f"[SEND_ORDER][ERROR] Unexpected exception: {e}")
+            return None
 
 async def cancel_order_async(order_id: str, max_retries: int = 2):
     for attempt in range(1, max_retries + 1):
