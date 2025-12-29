@@ -1132,6 +1132,10 @@ async def perform_trade(market_id: str):
                 existing["cancel_requested_at"] = time.time()
                 await cancel_order_async(existing["id"])
             wo[side_key] = None
+            # CRITICAL: Skip this quote cycle after canceling to prevent race condition
+            # If we place new order immediately, both orders could be live for 50-200ms
+            # Next perform_trade() will place the new order with correct price
+            return
         if VERBOSE:
             print(f"[MM] manage_side {side_key}: sending GTC {side_str} size={size} px={desired_price} token={token_id}")
 
