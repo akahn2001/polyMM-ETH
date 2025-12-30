@@ -268,11 +268,11 @@ async def reconcile_loop():
 # Z-score predictive IOC parameters
 Z_SCORE_IOC_THRESHOLD = .70          # Minimum |z| to trigger predictive IOC (strong signal)
 Z_IOC_OPTION_MOVE_THRESHOLD = 0.07   # 6 cents predicted option move required to justify crossing spread
-MIN_EDGE_IOC = 0.06                  # 4 cents minimum edge required after predicted move (prevents firing on stale signals)
+MIN_EDGE_IOC = 0.07                  # 4 cents minimum edge required after predicted move (prevents firing on stale signals)
 IOC_COOLDOWN = 10.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
-BASE_QUOTE_SPREAD = 0.040             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
+BASE_QUOTE_SPREAD = 0.050             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 20
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
@@ -305,7 +305,7 @@ MAX_OPTION_SPREAD_MULT = 2.0      # Max spread multiplier cap (was 3.0)
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = 0   # max fair value nudge (1 cent)
+MAX_IMBALANCE_ADJUSTMENT = .01   # max fair value nudge (1 cent)
 
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .50  # .5 cent option move triggers immediate cancel # TODO: jitter may throw this off
