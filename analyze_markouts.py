@@ -445,6 +445,129 @@ def book_imbalance_analysis(df):
     print(f"  Std imbalance:  {df_imb['book_imbalance'].std():.3f}")
     print(f"  Min/Max:        {df_imb['book_imbalance'].min():.3f} / {df_imb['book_imbalance'].max():.3f}")
 
+def zscore_predictor_analysis(df):
+    """Analyze if Coinbase-RTDS z-score predictor is working."""
+    print("\n" + "=" * 80)
+    print("Z-SCORE PREDICTOR ANALYSIS (Coinbase-RTDS Spread)")
+    print("=" * 80)
+
+    if 'zscore' not in df.columns:
+        print("  ⚠️  zscore not in data - run with updated markouts code")
+        print("     Delete detailed_fills.csv and restart bot to get this data")
+        return
+
+    # Filter out fills without z-score data
+    df_z = df[df['zscore'].notna()].copy()
+    if len(df_z) == 0:
+        print("  ⚠️  No z-score data available")
+        return
+
+    print(f"Fills with z-score data: {len(df_z)} / {len(df)}")
+
+    # Correlation with markouts
+    z_corr = df_z['zscore'].corr(df_z['markout_5s'])
+    print(f"\nZ-score → Markout correlation: {z_corr:.3f}")
+
+    # Key insight: We should see DIRECTIONAL effects
+    # High z-score means RTDS will rise → we cancel ASK, keep BID
+    # When we get filled on BID (dir_yes=+1) during high z-score, we should profit
+    # Low z-score means RTDS will fall → we cancel BID, keep ASK
+    # When we get filled on ASK (dir_yes=-1) during low z-score, we should profit
+
+    # Performance by z-score regime
+    print(f"\nPerformance by z-score regime:")
+    high_pos_z = df_z[df_z['zscore'] > 0.8]
+    med_pos_z = df_z[(df_z['zscore'] > 0.3) & (df_z['zscore'] <= 0.8)]
+    neutral_z = df_z[abs(df_z['zscore']) <= 0.3]
+    med_neg_z = df_z[(df_z['zscore'] < -0.3) & (df_z['zscore'] >= -0.8)]
+    high_neg_z = df_z[df_z['zscore'] < -0.8]
+
+    print(f"  High +z (>0.8):     {len(high_pos_z):3d} fills, avg markout=${high_pos_z['markout_5s'].mean():.4f}")
+    print(f"  Med +z (0.3-0.8):   {len(med_pos_z):3d} fills, avg markout=${med_pos_z['markout_5s'].mean():.4f}")
+    print(f"  Neutral (±0.3):     {len(neutral_z):3d} fills, avg markout=${neutral_z['markout_5s'].mean():.4f}")
+    print(f"  Med -z (-0.8--0.3): {len(med_neg_z):3d} fills, avg markout=${med_neg_z['markout_5s'].mean():.4f}")
+    print(f"  High -z (<-0.8):    {len(high_neg_z):3d} fills, avg markout=${high_neg_z['markout_5s'].mean():.4f}")
+
+    # Z-score predictor logic test
+    print(f"\nZ-score predictor effectiveness:")
+    print(f"  (Testing if fills during extreme z-score have worse markouts)")
+
+    extreme_z = df_z[abs(df_z['zscore']) > 0.8]
+    neutral_z_fills = df_z[abs(df_z['zscore']) <= 0.3]
+
+    if len(extreme_z) > 0 and len(neutral_z_fills) > 0:
+        print(f"  Extreme z (|z|>0.8): {len(extreme_z)} fills, avg markout=${extreme_z['markout_5s'].mean():.4f}")
+        print(f"  Neutral z (|z|≤0.3): {len(neutral_z_fills)} fills, avg markout=${neutral_z_fills['markout_5s'].mean():.4f}")
+
+        comparison = compare_groups(extreme_z['markout_5s'], neutral_z_fills['markout_5s'],
+                                   "Extreme Z", "Neutral Z")
+        print(f"  {comparison}")
+
+        if extreme_z['markout_5s'].mean() < neutral_z_fills['markout_5s'].mean():
+            print(f"  ✅ Extreme z-score fills are WORSE - predictor is valuable!")
+            print(f"     → Canceling during extreme z-score should improve performance")
+        else:
+            print(f"  ❌ Extreme z-score fills are NOT worse")
+            print(f"     → Z-score predictor may not be working as intended")
+
+    # Directional z-score test: Does the predictor work as intended?
+    print(f"\nDirectional z-score test:")
+    print(f"  Theory: High +z → RTDS will rise → Cancel ASK, keep BID")
+    print(f"          Low -z → RTDS will fall → Cancel BID, keep ASK")
+
+    # When z > 0.8 and we bought (dir_yes=+1), did we make money?
+    bought_high_z = df_z[(df_z['zscore'] > 0.8) & (df_z['dir_yes'] == 1)]
+    # When z < -0.8 and we sold (dir_yes=-1), did we make money?
+    sold_low_z = df_z[(df_z['zscore'] < -0.8) & (df_z['dir_yes'] == -1)]
+
+    # WRONG side fills (should have been canceled):
+    # When z > 0.8 and we sold (dir_yes=-1), this is BAD (ASK should have been canceled)
+    sold_high_z = df_z[(df_z['zscore'] > 0.8) & (df_z['dir_yes'] == -1)]
+    # When z < -0.8 and we bought (dir_yes=+1), this is BAD (BID should have been canceled)
+    bought_low_z = df_z[(df_z['zscore'] < -0.8) & (df_z['dir_yes'] == 1)]
+
+    print(f"\n  CORRECT side (should be profitable):")
+    print(f"    Bought when z>0.8 (RTDS will rise):  {len(bought_high_z)} fills, avg markout=${bought_high_z['markout_5s'].mean():.4f}")
+    print(f"    Sold when z<-0.8 (RTDS will fall):   {len(sold_low_z)} fills, avg markout=${sold_low_z['markout_5s'].mean():.4f}")
+
+    print(f"\n  WRONG side (should be canceled by z-score logic):")
+    print(f"    Sold when z>0.8 (vulnerable ASK):    {len(sold_high_z)} fills, avg markout=${sold_high_z['markout_5s'].mean():.4f}")
+    print(f"    Bought when z<-0.8 (vulnerable BID): {len(bought_low_z)} fills, avg markout=${bought_low_z['markout_5s'].mean():.4f}")
+
+    if len(sold_high_z) > 0 or len(bought_low_z) > 0:
+        print(f"\n  ⚠️  WARNING: Getting filled on VULNERABLE side despite cancel logic!")
+        print(f"     → Either threshold (0.80) is too high, or cancels aren't fast enough")
+        if len(sold_high_z) > 0:
+            print(f"     → {len(sold_high_z)} fills on ASK when z>0.8 (should be canceled)")
+        if len(bought_low_z) > 0:
+            print(f"     → {len(bought_low_z)} fills on BID when z<-0.8 (should be canceled)")
+
+    # Compare correct vs wrong side
+    correct_side = pd.concat([bought_high_z, sold_low_z])
+    wrong_side = pd.concat([sold_high_z, bought_low_z])
+
+    if len(correct_side) > 0 and len(wrong_side) > 0:
+        comparison = compare_groups(correct_side['markout_5s'], wrong_side['markout_5s'],
+                                   "Correct Side", "Wrong Side")
+        print(f"\n  Comparison: {comparison}")
+
+        if correct_side['markout_5s'].mean() > wrong_side['markout_5s'].mean():
+            print(f"  ✅ Correct side fills are MORE profitable!")
+            print(f"     → Z-score predictor is working as intended")
+        else:
+            print(f"  ❌ Correct side fills are NOT better")
+            print(f"     → Z-score predictor may be broken or threshold is wrong")
+
+    # Z-score statistics
+    print(f"\nZ-score statistics:")
+    print(f"  Mean z-score:  {df_z['zscore'].mean():+.3f}")
+    print(f"  Std z-score:   {df_z['zscore'].std():.3f}")
+    print(f"  Min/Max:       {df_z['zscore'].min():+.3f} / {df_z['zscore'].max():+.3f}")
+    print(f"  |z|>0.8 count: {(abs(df_z['zscore']) > 0.8).sum()} ({(abs(df_z['zscore']) > 0.8).sum()/len(df_z)*100:.1f}%)")
+    print(f"  |z|>1.0 count: {(abs(df_z['zscore']) > 1.0).sum()} ({(abs(df_z['zscore']) > 1.0).sum()/len(df_z)*100:.1f}%)")
+    print(f"  |z|>2.0 count: {(abs(df_z['zscore']) > 2.0).sum()} ({(abs(df_z['zscore']) > 2.0).sum()/len(df_z)*100:.1f}%)")
+
+
 def realized_vol_theo_analysis(df):
     """Test if realized vol theo has predictive power vs implied vol theo."""
     print("\n" + "=" * 80)
@@ -760,6 +883,7 @@ def main():
     overall_performance(df)
     maker_vs_taker_analysis(df)  # NEW: Compare GTC vs IOC fills
     momentum_analysis(df)
+    zscore_predictor_analysis(df)  # NEW: Analyze z-score predictor
     theo_value_test(df)
     model_vs_market_test(df)
     adverse_selection_test(df)

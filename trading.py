@@ -2,6 +2,7 @@ import global_state
 import asyncio
 import time
 import math
+import threading
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from markouts import record_fill
@@ -15,6 +16,10 @@ from util import bs_binary_call
 
 RECONCILE_INTERVAL = 0.50  # seconds (start here; tighten later if stable)
 RECONCILE_MAX_CANCEL_BATCH = 50  # keep batches mo  dest to avoid Cloudflare pain
+
+# IOC cooldown tracking (prevents spamming IOCs when z-score stays elevated)
+ioc_cooldown_lock = threading.Lock()  # Protects concurrent access to last_ioc_time
+last_ioc_time = {}  # {market_id: timestamp}
 
 def tick_down(p: float, tick: float) -> float:
     return math.floor(p / tick + 1e-12) * tick
@@ -127,7 +132,7 @@ def _extract_id(o):
         return o.get("id") or o.get("orderID") or o.get("order_id")
     return getattr(o, "id", None) or getattr(o, "order_id", None)
 
-IOC_STALE_THRESHOLD = 30.0  # seconds - clean up IOC deltas older than this
+IOC_STALE_THRESHOLD = 20.0  # seconds - clean up IOC deltas older than this
 
 def cleanup_stale_ioc_deltas():
     """
@@ -259,10 +264,14 @@ async def reconcile_loop():
 # TODO: QUOTE TIGHTER- I BELIEVE NEW ROUNDING LOGIC MEANS SPREAD=.03 IS NOT AS TIGHT AS WE THINK, TRY .02 or EVEN .015
 # TODO: REDUCE LATENCY, CLEAR PRINT STATEMENTS, REDUCE BACKGROUND TASKS
 # had .04 base width before, skew_k=1.0, min_order_interval=1.0, price_move_tol = .0035
-EDGE_TAKE_THRESHOLD = 2.0      # edge to justify crossing when OPENING position
-EDGE_TAKE_THRESHOLD_REDUCE = 2.0  # lower threshold when REDUCING position (closing risk is more valuable)
+
+# Z-score predictive IOC parameters
+Z_SCORE_IOC_THRESHOLD = 1.7          # Minimum |z| to trigger predictive IOC (strong signal)
+Z_IOC_OPTION_MOVE_THRESHOLD = 0.06   # 6 cents predicted option move required to justify crossing spread
+MIN_EDGE_IOC = 0.04                  # 4 cents minimum edge required after predicted move (prevents firing on stale signals)
+IOC_COOLDOWN = 10.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
-IOC_SIZE_REDUCE = 10             # max size for IOC orders that reduce position (also capped by position size)
+IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
 BASE_QUOTE_SPREAD = 0.040             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 10
 BASE_SIZE = 5.0
@@ -731,6 +740,93 @@ def update_position_yes_space(market_id: str, outcome_token: str, side: str, siz
             f"vwap_yes={pos.vwap_yes:.4f} price={price}"
         )
 
+def check_zscore_ioc_signal(market_id: str) -> tuple[bool, bool, float]:
+    """
+    Check if z-score predictor signals a high-conviction IOC opportunity.
+
+    Returns (allow_buy_yes, allow_sell_yes, predicted_option_move):
+    - allow_buy_yes = True: z-score predicts RTDS will rise, should take offer (BUY YES)
+    - allow_sell_yes = True: z-score predicts RTDS will fall, should take bid (SELL YES = BUY NO)
+    - predicted_option_move: Expected option value change (used for edge calculation)
+
+    Logic:
+    1. Check if |z| > Z_SCORE_IOC_THRESHOLD (1.7)
+    2. Calculate predicted RTDS move = z * spread_std_dev
+    3. Calculate option value change using BS model
+    4. If predicted option move > Z_IOC_OPTION_MOVE_THRESHOLD (6 cents), allow IOC
+    """
+    z = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
+
+    # Check if z-score signal is strong enough
+    if abs(z) < Z_SCORE_IOC_THRESHOLD:
+        return False, False, 0.0
+
+    # Get spread history for std dev calculation
+    history = getattr(global_state, 'coinbase_rtds_zscore_history', [])
+    if len(history) < 30:
+        return False, False, 0.0  # Not enough data
+
+    # Calculate std dev of recent spreads (same 5-min window as z-score calculation)
+    now = time.time()
+    cutoff_time = now - (5 * 60)
+    recent_spreads = [s for (ts, s) in history if ts >= cutoff_time]
+
+    if len(recent_spreads) < 30:
+        return False, False, 0.0
+
+    import numpy as np
+    spread_std = np.std(recent_spreads)
+
+    # Predicted RTDS move = z_score × spread_std
+    predicted_rtds_move = z * spread_std
+
+    # Get current RTDS price
+    S_current = global_state.mid_price
+    if S_current is None:
+        return False, False, 0.0
+
+    # Get vol and strike
+    sigma = global_state.fair_vol.get(market_id)
+    if sigma is None:
+        return False, False, 0.0
+
+    K = global_state.strike
+    exp = global_state.exp
+
+    # Calculate time to expiry
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    T = (exp - now_et).total_seconds() / (365 * 24 * 60 * 60)
+
+    if T <= 0:
+        return False, False, 0.0
+
+    # Calculate option value at current spot
+    from util import bs_binary_call
+    current_option = bs_binary_call(S_current, K, T, 0.0, sigma, 0.0, 1.0)
+
+    # Calculate option value after predicted RTDS move
+    future_option = bs_binary_call(S_current + predicted_rtds_move, K, T, 0.0, sigma, 0.0, 1.0)
+
+    predicted_option_move = future_option - current_option
+
+    # Check if predicted move exceeds threshold
+    if abs(predicted_option_move) < Z_IOC_OPTION_MOVE_THRESHOLD:
+        return False, False, 0.0
+
+    # Determine direction
+    # z > +1.7 → RTDS will rise → option will rise → BUY YES (take offer)
+    # z < -1.7 → RTDS will fall → option will fall → SELL YES (take bid) = BUY NO
+    if z > Z_SCORE_IOC_THRESHOLD and predicted_option_move > 0:
+        print(f"[Z-IOC] z={z:.2f} predicts RTDS +${predicted_rtds_move:.2f} → option +${predicted_option_move:.3f} → BUY YES")
+        return True, False, predicted_option_move  # Buy YES
+    elif z < -Z_SCORE_IOC_THRESHOLD and predicted_option_move < 0:
+        print(f"[Z-IOC] z={z:.2f} predicts RTDS ${predicted_rtds_move:.2f} → option ${predicted_option_move:.3f} → SELL YES")
+        return False, True, predicted_option_move  # Sell YES
+
+    return False, False, 0.0
+
 async def perform_trade(market_id: str):
     """
     MM logic for BTC 15m up/down market where:
@@ -1029,53 +1125,98 @@ async def perform_trade(market_id: str):
     if VERBOSE:
         print(f"[MM] capacity: max_buy_yes={max_buy_yes}, max_buy_no={max_buy_no}")
 
-    # ----- aggressive IOC path (parallel execution) -----
+    # ----- Z-score predictive IOC path (parallel execution) -----
     ioc_tasks = []
 
-    # Use lower edge threshold when REDUCING position (more willing to close risk)
-    # BUY YES reduces position when net_yes < 0 (short YES, buying brings us closer to 0)
-    # BUY NO reduces position when net_yes > 0 (long YES, buying NO brings us closer to 0)
-    threshold_buy_yes = EDGE_TAKE_THRESHOLD_REDUCE if net_yes < 0 else EDGE_TAKE_THRESHOLD
-    threshold_buy_no = EDGE_TAKE_THRESHOLD_REDUCE if net_yes > 0 else EDGE_TAKE_THRESHOLD
+    # Atomically check cooldown to prevent spamming IOCs when z-score stays elevated
+    # Lock prevents race where two concurrent perform_trade() calls both fire IOCs
+    now = time.time()
+    should_check_signal = False
 
-    if edge_ask_yes > threshold_buy_yes and max_buy_yes > 0:
-        # BUY YES reduces position when short (filled_yes < 0), builds when long/flat
-        if filled_yes < 0:
-            size = min(IOC_SIZE_REDUCE, int(abs(filled_yes)), max_buy_yes)
-        else:
-            size = min(IOC_SIZE_BUILD, max_buy_yes)
-        if size > 0:
-            if VERBOSE:
-                print(f"[MM] TAKE BUY YES: size={size}, px={best_ask_yes}, threshold={threshold_buy_yes:.3f}")
-            ioc_tasks.append(send_order(
-                yes_token,
-                "BUY",
-                best_ask_yes,
-                size,
-                "IOC",
-                market_id=market_id,
-            ))
+    with ioc_cooldown_lock:
+        last_ioc = last_ioc_time.get(market_id, 0.0)
+        in_cooldown = (now - last_ioc) < IOC_COOLDOWN
 
-    if edge_bid_yes > threshold_buy_no and max_buy_no > 0:
-        # BUY NO reduces position when long (filled_yes > 0), builds when short/flat
-        if filled_yes > 0:
-            size = min(IOC_SIZE_REDUCE, int(abs(filled_yes)), max_buy_no)
+        if not in_cooldown:
+            # Claim the cooldown slot immediately (before expensive z-score calc)
+            last_ioc_time[market_id] = now
+            should_check_signal = True
+
+    if should_check_signal:
+        # Check if z-score predictor signals a high-conviction IOC opportunity
+        # (outside lock - this is expensive)
+        z_allow_buy_yes, z_allow_sell_yes, predicted_option_move = check_zscore_ioc_signal(market_id)
+    else:
+        # In cooldown - suppress IOC
+        z_allow_buy_yes, z_allow_sell_yes, predicted_option_move = False, False, 0.0
+
+    # BUY YES (take offer) - triggered by z-score prediction of RTDS rise
+    if z_allow_buy_yes and max_buy_yes > 0:
+        # Calculate expected fair value AFTER predicted move
+        expected_fair_after_move = fair_adj_yes + predicted_option_move
+
+        # Check if we STILL have edge vs current market price
+        edge_after_move = expected_fair_after_move - best_ask_yes
+
+        if edge_after_move > MIN_EDGE_IOC:
+            # Market hasn't already moved, still have edge - fire IOC
+            # Size based on position: reduce vs build
+            if filled_yes < 0:
+                # Reducing short position - use larger size
+                size = min(IOC_SIZE_REDUCE, int(abs(filled_yes)), max_buy_yes)
+            else:
+                # Building long position - use smaller size
+                size = min(IOC_SIZE_BUILD, max_buy_yes)
+
+            if size > 0:
+                ioc_tasks.append(send_order(
+                    yes_token,
+                    "BUY",
+                    best_ask_yes,
+                    size,
+                    "IOC",
+                    market_id=market_id,
+                ))
         else:
-            size = min(IOC_SIZE_BUILD, max_buy_no)
-        price_no = yes_to_no_price(best_bid_yes)
-        if size > 0:
-            if VERBOSE:
-                print(f"[MM] TAKE BUY NO: size={size}, px={price_no}, threshold={threshold_buy_no:.3f}")
-            ioc_tasks.append(send_order(
-                no_token,
-                "BUY",
-                price_no,
-                size,
-                "IOC",
-                market_id=market_id,
-            ))
+            # Market already moved, no edge left
+            print(f"[Z-IOC] Suppressed BUY YES: market already moved, edge_after_move={edge_after_move:.4f} < {MIN_EDGE_IOC:.4f}")
+
+    # SELL YES (take bid) = BUY NO - triggered by z-score prediction of RTDS fall
+    if z_allow_sell_yes and max_buy_no > 0:
+        # Calculate expected fair value AFTER predicted move
+        # predicted_option_move is negative for falling RTDS
+        expected_fair_after_move = fair_adj_yes + predicted_option_move
+
+        # Check if we STILL have edge vs current market price (for selling YES = buying NO)
+        # When selling YES, we want fair to be below bid (we can sell above fair)
+        edge_after_move = best_bid_yes - expected_fair_after_move
+
+        if edge_after_move > MIN_EDGE_IOC:
+            # Market hasn't already moved, still have edge - fire IOC
+            # Size based on position: reduce vs build
+            if filled_yes > 0:
+                # Reducing long position - use larger size
+                size = min(IOC_SIZE_REDUCE, int(abs(filled_yes)), max_buy_no)
+            else:
+                # Building short position - use smaller size
+                size = min(IOC_SIZE_BUILD, max_buy_no)
+
+            price_no = yes_to_no_price(best_bid_yes)
+            if size > 0:
+                ioc_tasks.append(send_order(
+                    no_token,
+                    "BUY",
+                    price_no,
+                    size,
+                    "IOC",
+                    market_id=market_id,
+                ))
+        else:
+            # Market already moved, no edge left
+            print(f"[Z-IOC] Suppressed SELL YES: market already moved, edge_after_move={edge_after_move:.4f} < {MIN_EDGE_IOC:.4f}")
 
     if ioc_tasks:
+        # Cooldown timestamp already updated atomically when we claimed the slot
         await asyncio.gather(*ioc_tasks)
 
     # ----- resting GTC path -----

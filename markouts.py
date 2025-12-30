@@ -127,6 +127,9 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
     realized_vol_5m = getattr(global_state, 'realized_vol_5m', None)
     realized_vol_15m = getattr(global_state, 'realized_vol_15m', None)
 
+    # Z-score tracking (Coinbase-RTDS spread predictor)
+    zscore = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
+
     # Vol edge = realized - implied (positive means market underpricing vol)
     vol_edge_5m = (realized_vol_5m - implied_vol) if (realized_vol_5m is not None and implied_vol is not None) else None
     vol_edge_15m = (realized_vol_15m - implied_vol) if (realized_vol_15m is not None and implied_vol is not None) else None
@@ -261,6 +264,8 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
         "vol_edge_5m": vol_edge_5m,  # realized_5m - implied (positive = market underpricing vol)
         "vol_edge_15m": vol_edge_15m,  # realized_15m - implied
         "realized_vol_theo": realized_vol_theo,  # theo priced with realized vol instead of implied
+        # Z-score predictor
+        "zscore": zscore,  # Coinbase-RTDS spread z-score (+ means RTDS will rise, - means RTDS will fall)
     })
 
 def _pct(vals, p):
@@ -374,7 +379,7 @@ def _write_detailed_fills_csv():
     with open(detailed_path, "a", newline="") as f:
         fieldnames = [
             "timestamp", "order_type", "fill_yes", "dir_yes", "side", "token_type", "qty",
-            "momentum", "momentum_volatility", "delta",
+            "momentum", "momentum_volatility", "delta", "zscore",
             "theo", "binance_theo", "market_mid", "fair_yes",
             "edge_vs_theo", "edge_vs_fair", "model_vs_market",
             "net_yes_before", "net_yes_after", "book_imbalance",
@@ -412,6 +417,7 @@ def _write_detailed_fills_csv():
                 "momentum": rec.get("momentum"),
                 "momentum_volatility": rec.get("momentum_volatility"),
                 "delta": rec.get("delta"),
+                "zscore": rec.get("zscore"),
                 "theo": rec.get("theo"),
                 "binance_theo": rec.get("binance_theo"),
                 "market_mid": rec.get("market_mid"),
