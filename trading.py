@@ -288,7 +288,7 @@ MIN_TICKS_BUILD = 1.0   # ticks from touch when building position (more conserva
 MIN_TICKS_REDUCE = 1.0   # ticks from touch when reducing position (want to get filled)
 MIN_EDGE_TO_QUOTE = 0.02  # minimum edge (in price points) required to quote a side
 
-MIN_ORDER_INTERVAL = 1.0  # seconds → max 5 orders/sec per market+side, # changed this back to 1
+MIN_ORDER_INTERVAL = .50  # seconds → max 5 orders/sec per market+side, # changed this back to 1
 POST_FILL_COOLDOWN = 1.0  # seconds to pause quoting on a side after getting filled (GTC only)
 
 # Binance momentum adjustment
@@ -1053,6 +1053,11 @@ async def perform_trade(market_id: str):
                             print(f"[MM] Option sensitivity: BTC move=${btc_move:.2f}, option move={option_move:.4f}, spread mult={option_move_mult:.2f}x")
 
     quote_spread = BASE_QUOTE_SPREAD * mult * mult_warm * option_move_mult
+
+    # Store spread multiplier for display
+    if not hasattr(global_state, 'spread_mult_by_market'):
+        global_state.spread_mult_by_market = {}
+    global_state.spread_mult_by_market[market_id] = option_move_mult
 
     raw_size = BASE_SIZE / mult
     raw_size = BASE_SIZE

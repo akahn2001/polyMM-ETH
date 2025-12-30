@@ -16,6 +16,9 @@ import os
 import requests
 import json
 import time
+import hmac
+import hashlib
+import base64
 from dotenv import load_dotenv
 from eth_account import Account
 from eth_account.messages import encode_defunct
@@ -25,7 +28,7 @@ load_dotenv()
 
 # API endpoints
 DATA_API = "https://data-api.polymarket.com"
-RELAYER_API = "https://relayer.polymarket.com"  # May need adjustment
+RELAYER_API = "https://relayer-v2.polymarket.com"
 
 # Contract addresses on Polygon
 CTF_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
@@ -113,14 +116,38 @@ def display_positions(positions: list, title: str = "Positions"):
         print('='*60)
 
 
-def create_redeem_signature(private_key: str, condition_id: str, timestamp: int) -> str:
-    """Create a signature for the redeem request."""
-    # This is a simplified version - actual implementation may differ
-    message = f"redeem:{condition_id}:{timestamp}"
-    account = Account.from_key(private_key)
-    message_hash = encode_defunct(text=message)
-    signed = account.sign_message(message_hash)
-    return signed.signature.hex()
+def create_builder_hmac_signature(
+    secret: str,
+    timestamp: str,
+    method: str,
+    path: str,
+    body: str = ""
+) -> str:
+    """
+    Create HMAC signature for Polymarket Builder API authentication.
+
+    Args:
+        secret: Builder API secret
+        timestamp: Unix timestamp as string
+        method: HTTP method (e.g., "POST")
+        path: API path (e.g., "/execute")
+        body: JSON body as string
+
+    Returns:
+        Base64-encoded HMAC signature
+    """
+    # Message format: timestamp + method + path + body
+    message = timestamp + method + path + body
+
+    # Create HMAC-SHA256 signature
+    signature = hmac.new(
+        secret.encode('utf-8'),
+        message.encode('utf-8'),
+        hashlib.sha256
+    ).digest()
+
+    # Return base64-encoded signature
+    return base64.b64encode(signature).decode('utf-8')
 
 
 def redeem_position_via_relayer(
@@ -174,35 +201,55 @@ def redeem_position_via_relayer(
 
     print(f"  Encoded call data: {call_data[:50]}...")
 
-    # Try to submit via relayer
-    # Note: This endpoint structure is speculative - may need adjustment
-    timestamp = int(time.time())
+    # Get Builder API credentials from environment
+    builder_api_key = os.getenv("POLYMARKET_BUILDER_API_KEY")
+    builder_secret = os.getenv("POLYMARKET_BUILDER_SECRET")
+    builder_passphrase = os.getenv("POLYMARKET_BUILDER_PASSPHRASE")
 
-    headers = {
-        "Content-Type": "application/json",
-    }
+    if not all([builder_api_key, builder_secret, builder_passphrase]):
+        return {
+            "success": False,
+            "error": "Missing Builder API credentials. Set POLYMARKET_BUILDER_API_KEY, POLYMARKET_BUILDER_SECRET, and POLYMARKET_BUILDER_PASSPHRASE in .env"
+        }
+
+    # Prepare request
+    timestamp = str(int(time.time() * 1000))  # Milliseconds timestamp
+    method = "POST"
+    path = "/execute"
 
     payload = {
         "target": ctf_address,
         "data": call_data,
-        "owner": funder_address,
-        "timestamp": timestamp,
+        "from": funder_address,
     }
 
-    # Sign the payload
-    message = json.dumps(payload, sort_keys=True)
-    signature = create_redeem_signature(private_key, condition_id, timestamp)
+    body = json.dumps(payload, separators=(',', ':'))
 
-    headers["X-Signature"] = signature
-    headers["X-Address"] = funder_address
+    # Create HMAC signature for Builder API authentication
+    signature = create_builder_hmac_signature(
+        builder_secret,
+        timestamp,
+        method,
+        path,
+        body
+    )
+
+    # Builder API authentication headers
+    headers = {
+        "Content-Type": "application/json",
+        "POLY_BUILDER_API_KEY": builder_api_key,
+        "POLY_BUILDER_PASSPHRASE": builder_passphrase,
+        "POLY_BUILDER_SIGNATURE": signature,
+        "POLY_BUILDER_TIMESTAMP": timestamp,
+    }
 
     print(f"  Submitting to relayer...")
 
     try:
         resp = requests.post(
-            f"{RELAYER_API}/execute",
+            f"{RELAYER_API}{path}",
             headers=headers,
-            json=payload,
+            data=body,
             timeout=30
         )
 

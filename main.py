@@ -104,11 +104,16 @@ def update_periodically(client):
                 except:
                     pass
 
+                # Get spread multiplier for display
+                spread_mult = 1.0
+                if hasattr(global_state, 'spread_mult_by_market'):
+                    spread_mult = global_state.spread_mult_by_market.get(market_id, 1.0)
+
                 # Only print if we have valid prices
                 if price_source == "COINBASE":
                     if exchange_spot is not None and main_theo is not None and fair_vol is not None:
                         # Show Coinbase, bias correction, and adjusted price
-                        print(f"RTDS: {rtds_spot:.2f}  CB: {exchange_spot:.2f}  BIAS: {coinbase_bias:+.2f}  CB_ADJ: {coinbase_adjusted:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
+                        print(f"RTDS: {rtds_spot:.2f}  CB: {exchange_spot:.2f}  BIAS: {coinbase_bias:+.2f}  CB_ADJ: {coinbase_adjusted:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}  SPREAD: {spread_mult:.2f}x")
                     elif exchange_spot is None and rtds_spot is not None:
                         # Waiting for Coinbase price
                         print(f"[WAITING] RTDS connected ({rtds_spot:.2f}), waiting for Coinbase price...")
@@ -120,7 +125,7 @@ def update_periodically(client):
                         # Show pure RTDS with Coinbase predictor data
                         z_score = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
                         cb_price = coinbase_spot if coinbase_spot is not None else 0.0
-                        print(f"RTDS: {rtds_spot:.2f}  CB: {cb_price:.2f}  Z: {z_score:+.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
+                        print(f"RTDS: {rtds_spot:.2f}  CB: {cb_price:.2f}  Z: {z_score:+.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}  SPREAD: {spread_mult:.2f}x")
                     elif rtds_spot is None:
                         # Waiting for RTDS
                         print(f"[WAITING] Waiting for RTDS connection...")
