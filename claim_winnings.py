@@ -164,15 +164,13 @@ def redeem_position_via_relayer(
     if not condition_id.startswith("0x"):
         condition_id = "0x" + condition_id
 
-    call_data = contract.encode_abi(
-        fn_name="redeemPositions",
-        args=[
-            USDC_ADDRESS,
-            bytes.fromhex(PARENT_COLLECTION_ID[2:]),
-            bytes.fromhex(condition_id[2:]),
-            index_sets
-        ]
-    )
+    # Use modern web3.py API - build function call and extract calldata
+    call_data = contract.functions.redeemPositions(
+        USDC_ADDRESS,
+        bytes.fromhex(PARENT_COLLECTION_ID[2:]),
+        bytes.fromhex(condition_id[2:]),
+        index_sets
+    )._encode_transaction_data()
 
     print(f"  Encoded call data: {call_data[:50]}...")
 
