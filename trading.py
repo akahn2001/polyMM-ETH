@@ -267,7 +267,7 @@ async def reconcile_loop():
 
 # Z-score predictive IOC parameters
 Z_SCORE_IOC_THRESHOLD = .70          # Minimum |z| to trigger predictive IOC (strong signal)
-Z_IOC_OPTION_MOVE_THRESHOLD = 0.06   # 6 cents predicted option move required to justify crossing spread
+Z_IOC_OPTION_MOVE_THRESHOLD = 0.07   # 6 cents predicted option move required to justify crossing spread
 MIN_EDGE_IOC = 0.06                  # 4 cents minimum edge required after predicted move (prevents firing on stale signals)
 IOC_COOLDOWN = 10.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
@@ -305,7 +305,7 @@ MAX_OPTION_SPREAD_MULT = 2.0      # Max spread multiplier cap (was 3.0)
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = 0.010   # max fair value nudge (1 cent)
+MAX_IMBALANCE_ADJUSTMENT = 0   # max fair value nudge (1 cent)
 
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .50  # .5 cent option move triggers immediate cancel # TODO: jitter may throw this off
@@ -314,7 +314,7 @@ EARLY_CANCEL_OPTION_MOVE = .50  # .5 cent option move triggers immediate cancel 
 COINBASE_RTDS_ZSCORE_THRESHOLD = 0.70  # Skip vulnerable side when |z| > 0.80
 
 # Z-score skew (continuous adjustment based on predicted RTDS movement)
-MAX_Z_SCORE_SKEW = 0.035  # Cap z-score skew at ±1.5 cents
+MAX_Z_SCORE_SKEW = 0.025  # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
 
 VERBOSE = False
 
@@ -1113,14 +1113,36 @@ async def perform_trade(market_id: str):
                 # Predicted RTDS move = z_score × spread_std
                 predicted_rtds_move = z_score * spread_std
 
-                # Get binary delta for this market
-                delta = global_state.binary_delta.get(market_id, 0.0)
+                # Reprice option to capture gamma (not just delta approximation)
+                price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+                if price_source == "COINBASE":
+                    S_current = global_state.coinbase_mid_price
+                elif price_source == "RTDS":
+                    S_current = global_state.mid_price
+                else:  # BLEND
+                    S_current = global_state.blended_price
 
-                # Predicted option move = RTDS move × delta
-                z_skew = predicted_rtds_move * abs(delta)
+                sigma = global_state.fair_vol.get(market_id)
 
-                # Cap the skew
-                z_skew = max(-MAX_Z_SCORE_SKEW, min(MAX_Z_SCORE_SKEW, z_skew))
+                if S_current is not None and sigma is not None:
+                    K = global_state.strike
+                    now_et = datetime.now(ZoneInfo("America/New_York"))
+                    T = (global_state.exp - now_et).total_seconds() / (60 * 60 * 24 * 365)
+
+                    if T > 0:
+                        from util import bs_binary_call
+
+                        # Price option at current spot
+                        current_option = bs_binary_call(S_current, K, T, 0.0, sigma, 0.0, 1.0)
+
+                        # Price option at spot + predicted move (includes gamma!)
+                        future_option = bs_binary_call(S_current + predicted_rtds_move, K, T, 0.0, sigma, 0.0, 1.0)
+
+                        # Z-skew is the predicted option value change
+                        z_skew = future_option - current_option
+
+                        # Cap the skew
+                        z_skew = max(-MAX_Z_SCORE_SKEW, min(MAX_Z_SCORE_SKEW, z_skew))
 
     # Apply z-score skew to fair value
     fair_adj_yes += z_skew
