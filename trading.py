@@ -266,7 +266,7 @@ async def reconcile_loop():
 # had .04 base width before, skew_k=1.0, min_order_interval=1.0, price_move_tol = .0035
 
 # Z-score predictive IOC parameters
-Z_SCORE_IOC_THRESHOLD = 1.5          # Minimum |z| to trigger predictive IOC (strong signal)
+Z_SCORE_IOC_THRESHOLD = 1.0          # Minimum |z| to trigger predictive IOC (strong signal)
 Z_IOC_OPTION_MOVE_THRESHOLD = 0.05   # 6 cents predicted option move required to justify crossing spread
 MIN_EDGE_IOC = 0.04                  # 4 cents minimum edge required after predicted move (prevents firing on stale signals)
 IOC_COOLDOWN = 10.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
@@ -1212,6 +1212,7 @@ async def perform_trade(market_id: str):
                 size = min(IOC_SIZE_BUILD, max_buy_yes)
 
             if size > 0:
+                z_score = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
                 print(f"\n{'='*80}")
                 print(f"IOC ORDER PLACED!!! BUY YES")
                 print(f"  SIZE: {size} @ ${best_ask_yes:.2f}")
@@ -1253,6 +1254,7 @@ async def perform_trade(market_id: str):
 
             price_no = yes_to_no_price(best_bid_yes)
             if size > 0:
+                z_score = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
                 print(f"\n{'='*80}")
                 print(f"IOC ORDER PLACED!!! SELL YES (BUY NO)")
                 print(f"  SIZE: {size} @ ${best_bid_yes:.2f} YES (${price_no:.2f} NO)")
