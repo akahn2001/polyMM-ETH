@@ -272,7 +272,7 @@ MIN_EDGE_IOC = 0.04                  # 4 cents minimum edge required after predi
 IOC_COOLDOWN = 10.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
-BASE_QUOTE_SPREAD = 0.040             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
+BASE_QUOTE_SPREAD = 0.035             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 10
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
@@ -298,9 +298,9 @@ MAX_MOMENTUM_ADJUSTMENT = 0.03  # Max price adjustment from momentum (caps at 3 
 
 # Dynamic spread based on option price sensitivity
 OPTION_MOVE_LOOKBACK = 1.0        # Seconds to look back for BTC move
-OPTION_MOVE_THRESHOLD = 0.02      # 2 cents - start widening when option moved this much (was 0.01)
-OPTION_MOVE_SPREAD_SCALE = 0.5    # spread multiplier per cent above threshold (was 0.5)
-MAX_OPTION_SPREAD_MULT = 3.0      # Max spread multiplier cap (was 4.0)
+OPTION_MOVE_THRESHOLD = 0.02      # 2 cents - start widening when option moved this much (was 0.02)
+OPTION_MOVE_SPREAD_SCALE = 0.25    # spread multiplier per cent above threshold (was 0.5)
+MAX_OPTION_SPREAD_MULT = 2.0      # Max spread multiplier cap (was 3.0)
 
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
