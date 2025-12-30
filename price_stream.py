@@ -120,6 +120,12 @@ async def stream_btc_usd():
                             # Update Coinbase bias correction (track RTDS - Coinbase spread)
                             _update_coinbase_bias_correction(mid_price)
 
+                            # Update Coinbase-RTDS z-score (also update when RTDS changes, not just Coinbase)
+                            from coinbase_price_stream import _update_coinbase_rtds_zscore
+                            coinbase_price = getattr(global_state, 'coinbase_mid_price', None)
+                            if coinbase_price is not None:
+                                _update_coinbase_rtds_zscore(coinbase_price)
+
                             # Update price blend Kalman filter with RTDS observation
                             if hasattr(global_state, 'price_blend_filter') and global_state.price_blend_filter is not None:
                                 global_state.price_blend_filter.update_rtds(mid_price)
@@ -142,6 +148,12 @@ async def stream_btc_usd():
 
                             # Update Coinbase bias correction (track RTDS - Coinbase spread)
                             _update_coinbase_bias_correction(mid_price)
+
+                            # Update Coinbase-RTDS z-score (also update when RTDS changes, not just Coinbase)
+                            from coinbase_price_stream import _update_coinbase_rtds_zscore
+                            coinbase_price = getattr(global_state, 'coinbase_mid_price', None)
+                            if coinbase_price is not None:
+                                _update_coinbase_rtds_zscore(coinbase_price)
 
                             # Update price blend Kalman filter with RTDS observation
                             if hasattr(global_state, 'price_blend_filter') and global_state.price_blend_filter is not None:
