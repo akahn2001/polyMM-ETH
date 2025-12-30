@@ -3,6 +3,7 @@ import asyncio
 import time
 import math
 import threading
+import numpy as np
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from markouts import record_fill
@@ -777,7 +778,6 @@ def check_zscore_ioc_signal(market_id: str) -> tuple[bool, bool, float]:
     if len(recent_spreads) < 30:
         return False, False, 0.0
 
-    import numpy as np
     spread_std = np.std(recent_spreads)
 
     # Predicted RTDS move = z_score × spread_std
@@ -797,8 +797,6 @@ def check_zscore_ioc_signal(market_id: str) -> tuple[bool, bool, float]:
     exp = global_state.exp
 
     # Calculate time to expiry
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
     now_et = datetime.now(ZoneInfo("America/New_York"))
     T = (exp - now_et).total_seconds() / (365 * 24 * 60 * 60)
 
@@ -806,7 +804,6 @@ def check_zscore_ioc_signal(market_id: str) -> tuple[bool, bool, float]:
         return False, False, 0.0
 
     # Calculate option value at current spot
-    from util import bs_binary_call
     current_option = bs_binary_call(S_current, K, T, 0.0, sigma, 0.0, 1.0)
 
     # Calculate option value after predicted RTDS move
@@ -1102,7 +1099,6 @@ async def perform_trade(market_id: str):
         # Get spread std dev from z-score history
         history = getattr(global_state, 'coinbase_rtds_zscore_history', [])
         if len(history) >= 30:
-            import numpy as np
             now = time.time()
             cutoff_time = now - (5 * 60)  # 5-min window
             recent_spreads = [s for (ts, s) in history if ts >= cutoff_time]
@@ -1130,8 +1126,6 @@ async def perform_trade(market_id: str):
                     T = (global_state.exp - now_et).total_seconds() / (60 * 60 * 24 * 365)
 
                     if T > 0:
-                        from util import bs_binary_call
-
                         # Price option at current spot
                         current_option = bs_binary_call(S_current, K, T, 0.0, sigma, 0.0, 1.0)
 
