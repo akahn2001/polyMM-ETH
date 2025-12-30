@@ -267,8 +267,8 @@ async def reconcile_loop():
 
 # Z-score predictive IOC parameters
 Z_SCORE_IOC_THRESHOLD = .70          # Minimum |z| to trigger predictive IOC (strong signal)
-Z_IOC_OPTION_MOVE_THRESHOLD = 0.05   # 6 cents predicted option move required to justify crossing spread
-MIN_EDGE_IOC = 0.04                  # 4 cents minimum edge required after predicted move (prevents firing on stale signals)
+Z_IOC_OPTION_MOVE_THRESHOLD = 0.06   # 6 cents predicted option move required to justify crossing spread
+MIN_EDGE_IOC = 0.06                  # 4 cents minimum edge required after predicted move (prevents firing on stale signals)
 IOC_COOLDOWN = 10.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
