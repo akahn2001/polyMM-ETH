@@ -1212,6 +1212,13 @@ async def perform_trade(market_id: str):
                 size = min(IOC_SIZE_BUILD, max_buy_yes)
 
             if size > 0:
+                print(f"\n{'='*80}")
+                print(f"IOC ORDER PLACED!!! BUY YES")
+                print(f"  SIZE: {size} @ ${best_ask_yes:.2f}")
+                print(f"  Z-SCORE: {z_score:+.2f} | PREDICTED MOVE: {predicted_option_move:+.4f}")
+                print(f"  EDGE AFTER MOVE: ${edge_after_move:.4f}")
+                print(f"{'='*80}\n")
+
                 ioc_tasks.append(send_order(
                     yes_token,
                     "BUY",
@@ -1246,6 +1253,13 @@ async def perform_trade(market_id: str):
 
             price_no = yes_to_no_price(best_bid_yes)
             if size > 0:
+                print(f"\n{'='*80}")
+                print(f"IOC ORDER PLACED!!! SELL YES (BUY NO)")
+                print(f"  SIZE: {size} @ ${best_bid_yes:.2f} YES (${price_no:.2f} NO)")
+                print(f"  Z-SCORE: {z_score:+.2f} | PREDICTED MOVE: {predicted_option_move:+.4f}")
+                print(f"  EDGE AFTER MOVE: ${edge_after_move:.4f}")
+                print(f"{'='*80}\n")
+
                 ioc_tasks.append(send_order(
                     no_token,
                     "BUY",

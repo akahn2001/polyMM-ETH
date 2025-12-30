@@ -109,6 +109,11 @@ def update_periodically(client):
                 if hasattr(global_state, 'spread_mult_by_market'):
                     spread_mult = global_state.spread_mult_by_market.get(market_id, 1.0)
 
+                # Get z_skew for display (in cents)
+                z_skew_cents = 0.0
+                if hasattr(global_state, 'z_skew_by_market'):
+                    z_skew_cents = global_state.z_skew_by_market.get(market_id, 0.0) * 100
+
                 # Only print if we have valid prices
                 if price_source == "COINBASE":
                     if exchange_spot is not None and main_theo is not None and fair_vol is not None:
@@ -125,7 +130,7 @@ def update_periodically(client):
                         # Show pure RTDS with Coinbase predictor data
                         z_score = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
                         cb_price = coinbase_spot if coinbase_spot is not None else 0.0
-                        print(f"RTDS: {rtds_spot:.2f}  CB: {cb_price:.2f}  Z: {z_score:+.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}  SPREAD: {spread_mult:.2f}x")
+                        print(f"RTDS: {rtds_spot:.2f}  CB: {cb_price:.2f}  Z: {z_score:+.2f} (SKEW: {z_skew_cents:+.2f}¢)  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}  SPREAD: {spread_mult:.2f}x")
                     elif rtds_spot is None:
                         # Waiting for RTDS
                         print(f"[WAITING] Waiting for RTDS connection...")
@@ -133,7 +138,7 @@ def update_periodically(client):
                         # Waiting for vol/theo calibration
                         z_score = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
                         cb_price = coinbase_spot if coinbase_spot is not None else 0.0
-                        print(f"[WAITING] RTDS: {rtds_spot:.2f}  CB: {cb_price:.2f}  Z: {z_score:+.2f}  |  Calibrating vol/theo...")
+                        print(f"[WAITING] RTDS: {rtds_spot:.2f}  CB: {cb_price:.2f}  Z: {z_score:+.2f} (SKEW: {z_skew_cents:+.2f}¢)  |  Calibrating vol/theo...")
                 else:  # BLEND
                     if exchange_spot is not None and blended_spot is not None and main_theo is not None and fair_vol is not None:
                         print(f"RTDS: {rtds_spot:.2f}  BINANCE: {exchange_spot:.2f}  BLEND: {blended_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}  SPREAD: {spread_mult:.2f}x")
