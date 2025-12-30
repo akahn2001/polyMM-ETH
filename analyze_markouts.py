@@ -167,9 +167,13 @@ def momentum_analysis(df):
         print("     Delete detailed_fills.csv and restart bot to get this data")
         return
 
-    # Correlation
-    mom_corr = df['momentum'].corr(df['markout_5s'])
-    print(f"Momentum → Markout correlation: {mom_corr:.3f}")
+    # Directionally-adjusted correlation
+    # aligned_momentum = momentum * dir_yes
+    # Positive when trading WITH momentum (buy when rising, sell when falling)
+    df['aligned_momentum'] = df['momentum'] * df['dir_yes']
+
+    mom_corr = df['aligned_momentum'].corr(df['markout_5s'])
+    print(f"Directionally-adjusted Momentum → Markout correlation: {mom_corr:.3f}")
     if mom_corr > 0.1:
         print("  ✅ Positive correlation - momentum has predictive power!")
     elif mom_corr > 0:
@@ -392,14 +396,18 @@ def book_imbalance_analysis(df):
         return
 
     # Filter out NaN values
-    df_imb = df[df['book_imbalance'].notna()]
+    df_imb = df[df['book_imbalance'].notna()].copy()
     if len(df_imb) == 0:
         print("  ⚠️  No book imbalance data available")
         return
 
-    # Correlation with markouts
-    imb_corr = df_imb['book_imbalance'].corr(df_imb['markout_5s'])
-    print(f"Book Imbalance → Markout correlation: {imb_corr:.3f}")
+    # Directionally-adjusted correlation
+    # aligned_imbalance = book_imbalance * dir_yes
+    # Positive when trading WITH the flow (buy when bid>ask, sell when ask>bid)
+    df_imb['aligned_imbalance'] = df_imb['book_imbalance'] * df_imb['dir_yes']
+
+    imb_corr = df_imb['aligned_imbalance'].corr(df_imb['markout_5s'])
+    print(f"Directionally-adjusted Book Imbalance → Markout correlation: {imb_corr:.3f}")
     if imb_corr > 0.1:
         print("  ✅ Positive correlation - imbalance has predictive power!")
     elif imb_corr > 0:
@@ -464,9 +472,19 @@ def zscore_predictor_analysis(df):
 
     print(f"Fills with z-score data: {len(df_z)} / {len(df)}")
 
-    # Correlation with markouts
-    z_corr = df_z['zscore'].corr(df_z['markout_5s'])
-    print(f"\nZ-score → Markout correlation: {z_corr:.3f}")
+    # Directionally-adjusted correlation
+    # aligned_zscore = zscore * dir_yes
+    # Positive when trading WITH the signal (buy when z>0, sell when z<0)
+    df_z['aligned_zscore'] = df_z['zscore'] * df_z['dir_yes']
+
+    z_corr = df_z['aligned_zscore'].corr(df_z['markout_5s'])
+    print(f"\nDirectionally-adjusted Z-score → Markout correlation: {z_corr:.3f}")
+    if z_corr > 0.1:
+        print("  ✅ Positive correlation - z-score has predictive power!")
+    elif z_corr > 0:
+        print("  ⚠️  Weak positive correlation - z-score helps slightly")
+    else:
+        print("  ❌ Negative/zero correlation - z-score NOT predictive")
 
     # Key insight: We should see DIRECTIONAL effects
     # High z-score means RTDS will rise → we cancel ASK, keep BID
@@ -587,9 +605,19 @@ def z_skew_analysis(df):
 
     print(f"Fills with z_skew data: {len(df_skew)} / {len(df)}")
 
-    # Correlation with markouts
-    skew_corr = df_skew['z_skew'].corr(df_skew['markout_5s'])
-    print(f"\nZ-skew → Markout correlation: {skew_corr:.3f}")
+    # Directionally-adjusted correlation
+    # aligned_z_skew = z_skew * dir_yes
+    # Positive when trading WITH the signal (buy when z_skew>0, sell when z_skew<0)
+    df_skew['aligned_z_skew'] = df_skew['z_skew'] * df_skew['dir_yes']
+
+    skew_corr = df_skew['aligned_z_skew'].corr(df_skew['markout_5s'])
+    print(f"\nDirectionally-adjusted z-skew → Markout correlation: {skew_corr:.3f}")
+    if skew_corr > 0.15:
+        print("  ✅ Strong positive correlation - z-skew is predictive!")
+    elif skew_corr > 0.05:
+        print("  ⚠️  Weak positive correlation - z-skew has some value")
+    else:
+        print("  ❌ No/negative correlation - z-skew is NOT predictive")
 
     # Key insight: Z-skew adjusts fair value based on predicted RTDS movement
     # Positive z_skew means we think RTDS will rise (YES worth more)
