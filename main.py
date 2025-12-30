@@ -136,7 +136,7 @@ def update_periodically(client):
                         print(f"[WAITING] RTDS: {rtds_spot:.2f}  CB: {cb_price:.2f}  Z: {z_score:+.2f}  |  Calibrating vol/theo...")
                 else:  # BLEND
                     if exchange_spot is not None and blended_spot is not None and main_theo is not None and fair_vol is not None:
-                        print(f"RTDS: {rtds_spot:.2f}  BINANCE: {exchange_spot:.2f}  BLEND: {blended_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}")
+                        print(f"RTDS: {rtds_spot:.2f}  BINANCE: {exchange_spot:.2f}  BLEND: {blended_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}  SPREAD: {spread_mult:.2f}x")
                     elif exchange_spot is None and rtds_spot is not None:
                         # Waiting for Binance price
                         print(f"[WAITING] RTDS connected ({rtds_spot:.2f}), waiting for Binance price...")

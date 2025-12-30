@@ -129,6 +129,7 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
 
     # Z-score tracking (Coinbase-RTDS spread predictor)
     zscore = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
+    z_skew = getattr(global_state, 'z_skew_by_market', {}).get(market_id, 0.0)
 
     # Vol edge = realized - implied (positive means market underpricing vol)
     vol_edge_5m = (realized_vol_5m - implied_vol) if (realized_vol_5m is not None and implied_vol is not None) else None
@@ -266,6 +267,7 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
         "realized_vol_theo": realized_vol_theo,  # theo priced with realized vol instead of implied
         # Z-score predictor
         "zscore": zscore,  # Coinbase-RTDS spread z-score (+ means RTDS will rise, - means RTDS will fall)
+        "z_skew": z_skew,  # Applied fair value skew from z-score (in cents)
     })
 
 def _pct(vals, p):
@@ -379,7 +381,7 @@ def _write_detailed_fills_csv():
     with open(detailed_path, "a", newline="") as f:
         fieldnames = [
             "timestamp", "order_type", "fill_yes", "dir_yes", "side", "token_type", "qty",
-            "momentum", "momentum_volatility", "delta", "zscore",
+            "momentum", "momentum_volatility", "delta", "zscore", "z_skew",
             "theo", "binance_theo", "market_mid", "fair_yes",
             "edge_vs_theo", "edge_vs_fair", "model_vs_market",
             "net_yes_before", "net_yes_after", "book_imbalance",
@@ -418,6 +420,7 @@ def _write_detailed_fills_csv():
                 "momentum_volatility": rec.get("momentum_volatility"),
                 "delta": rec.get("delta"),
                 "zscore": rec.get("zscore"),
+                "z_skew": rec.get("z_skew"),
                 "theo": rec.get("theo"),
                 "binance_theo": rec.get("binance_theo"),
                 "market_mid": rec.get("market_mid"),

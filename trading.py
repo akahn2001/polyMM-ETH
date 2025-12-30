@@ -266,8 +266,8 @@ async def reconcile_loop():
 # had .04 base width before, skew_k=1.0, min_order_interval=1.0, price_move_tol = .0035
 
 # Z-score predictive IOC parameters
-Z_SCORE_IOC_THRESHOLD = 1.7          # Minimum |z| to trigger predictive IOC (strong signal)
-Z_IOC_OPTION_MOVE_THRESHOLD = 0.06   # 6 cents predicted option move required to justify crossing spread
+Z_SCORE_IOC_THRESHOLD = 1.5          # Minimum |z| to trigger predictive IOC (strong signal)
+Z_IOC_OPTION_MOVE_THRESHOLD = 0.05   # 6 cents predicted option move required to justify crossing spread
 MIN_EDGE_IOC = 0.04                  # 4 cents minimum edge required after predicted move (prevents firing on stale signals)
 IOC_COOLDOWN = 10.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
@@ -288,7 +288,7 @@ MIN_TICKS_BUILD = 1.0   # ticks from touch when building position (more conserva
 MIN_TICKS_REDUCE = 1.0   # ticks from touch when reducing position (want to get filled)
 MIN_EDGE_TO_QUOTE = 0.02  # minimum edge (in price points) required to quote a side
 
-MIN_ORDER_INTERVAL = .50  # seconds → max 5 orders/sec per market+side, # changed this back to 1
+MIN_ORDER_INTERVAL = .30  # seconds → max 5 orders/sec per market+side, # changed this back to 1
 POST_FILL_COOLDOWN = 1.0  # seconds to pause quoting on a side after getting filled (GTC only)
 
 # Binance momentum adjustment
@@ -305,13 +305,16 @@ MAX_OPTION_SPREAD_MULT = 2.0      # Max spread multiplier cap (was 3.0)
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = 0.015   # max fair value nudge (1 cent)
+MAX_IMBALANCE_ADJUSTMENT = 0.010   # max fair value nudge (1 cent)
 
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .50  # .5 cent option move triggers immediate cancel # TODO: jitter may throw this off
 
 # Coinbase-RTDS z-score threshold (predictive edge detection when using RTDS)
 COINBASE_RTDS_ZSCORE_THRESHOLD = 0.80  # Skip vulnerable side when |z| > 0.80
+
+# Z-score skew (continuous adjustment based on predicted RTDS movement)
+MAX_Z_SCORE_SKEW = 0.015  # Cap z-score skew at ±1.5 cents
 
 VERBOSE = False
 
@@ -1091,6 +1094,41 @@ async def perform_trade(market_id: str):
     skew = max(-SKEW_CAP, min(SKEW_CAP, skew))  # hard cap
 
     fair_adj_yes = fair_yes + skew
+
+    # Z-score skew: Adjust fair value based on predicted RTDS movement
+    z_skew = 0.0
+    z_score = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
+    if z_score != 0.0:
+        # Get spread std dev from z-score history
+        history = getattr(global_state, 'coinbase_rtds_zscore_history', [])
+        if len(history) >= 30:
+            import numpy as np
+            now = time.time()
+            cutoff_time = now - (5 * 60)  # 5-min window
+            recent_spreads = [s for (ts, s) in history if ts >= cutoff_time]
+
+            if len(recent_spreads) >= 30:
+                spread_std = np.std(recent_spreads)
+
+                # Predicted RTDS move = z_score × spread_std
+                predicted_rtds_move = z_score * spread_std
+
+                # Get binary delta for this market
+                delta = global_state.binary_delta.get(market_id, 0.0)
+
+                # Predicted option move = RTDS move × delta
+                z_skew = predicted_rtds_move * abs(delta)
+
+                # Cap the skew
+                z_skew = max(-MAX_Z_SCORE_SKEW, min(MAX_Z_SCORE_SKEW, z_skew))
+
+    # Apply z-score skew to fair value
+    fair_adj_yes += z_skew
+
+    # Store z-score skew for display and markout tracking
+    if not hasattr(global_state, 'z_skew_by_market'):
+        global_state.z_skew_by_market = {}
+    global_state.z_skew_by_market[market_id] = z_skew
 
     half_spread = quote_spread / 2.0
     raw_bid_yes = fair_adj_yes - half_spread

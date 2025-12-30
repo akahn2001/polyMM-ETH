@@ -568,6 +568,131 @@ def zscore_predictor_analysis(df):
     print(f"  |z|>2.0 count: {(abs(df_z['zscore']) > 2.0).sum()} ({(abs(df_z['zscore']) > 2.0).sum()/len(df_z)*100:.1f}%)")
 
 
+def z_skew_analysis(df):
+    """Analyze if z-score skew (continuous fair value adjustment) improves performance."""
+    print("\n" + "=" * 80)
+    print("Z-SCORE SKEW ANALYSIS (Continuous Fair Value Adjustment)")
+    print("=" * 80)
+
+    if 'z_skew' not in df.columns:
+        print("  ⚠️  z_skew not in data - run with updated markouts code")
+        print("     Delete detailed_fills.csv and restart bot to get this data")
+        return
+
+    # Filter out fills without z_skew data
+    df_skew = df[df['z_skew'].notna()].copy()
+    if len(df_skew) == 0:
+        print("  ⚠️  No z-score skew data available")
+        return
+
+    print(f"Fills with z_skew data: {len(df_skew)} / {len(df)}")
+
+    # Correlation with markouts
+    skew_corr = df_skew['z_skew'].corr(df_skew['markout_5s'])
+    print(f"\nZ-skew → Markout correlation: {skew_corr:.3f}")
+
+    # Key insight: Z-skew adjusts fair value based on predicted RTDS movement
+    # Positive z_skew means we think RTDS will rise (YES worth more)
+    # Negative z_skew means we think RTDS will fall (YES worth less)
+    # Favorable direction: when sign(z_skew) == sign(dir_yes)
+
+    # Performance by z_skew regime
+    print(f"\nPerformance by z-skew regime:")
+    high_pos = df_skew[df_skew['z_skew'] > 0.005]
+    med_pos = df_skew[(df_skew['z_skew'] > 0.001) & (df_skew['z_skew'] <= 0.005)]
+    neutral = df_skew[abs(df_skew['z_skew']) <= 0.001]
+    med_neg = df_skew[(df_skew['z_skew'] < -0.001) & (df_skew['z_skew'] >= -0.005)]
+    high_neg = df_skew[df_skew['z_skew'] < -0.005]
+
+    print(f"  High +skew (>0.5¢):     {len(high_pos):3d} fills, avg markout=${high_pos['markout_5s'].mean():.4f}")
+    print(f"  Med +skew (0.1-0.5¢):   {len(med_pos):3d} fills, avg markout=${med_pos['markout_5s'].mean():.4f}")
+    print(f"  Neutral (±0.1¢):        {len(neutral):3d} fills, avg markout=${neutral['markout_5s'].mean():.4f}")
+    print(f"  Med -skew (-0.5--0.1¢): {len(med_neg):3d} fills, avg markout=${med_neg['markout_5s'].mean():.4f}")
+    print(f"  High -skew (<-0.5¢):    {len(high_neg):3d} fills, avg markout=${high_neg['markout_5s'].mean():.4f}")
+
+    # Directional z_skew test
+    print(f"\nDirectional z_skew test:")
+    print(f"  Theory: +skew → RTDS will rise → Buy YES")
+    print(f"          -skew → RTDS will fall → Sell YES")
+
+    # Favorable direction: sign(z_skew) == sign(dir_yes)
+    # When z_skew > 0 and we bought (dir_yes=+1), that's favorable
+    bought_pos_skew = df_skew[(df_skew['z_skew'] > 0.003) & (df_skew['dir_yes'] == 1)]
+    # When z_skew < 0 and we sold (dir_yes=-1), that's favorable
+    sold_neg_skew = df_skew[(df_skew['z_skew'] < -0.003) & (df_skew['dir_yes'] == -1)]
+
+    # Unfavorable direction: sign(z_skew) != sign(dir_yes)
+    # When z_skew > 0 and we sold (dir_yes=-1), that's unfavorable
+    sold_pos_skew = df_skew[(df_skew['z_skew'] > 0.003) & (df_skew['dir_yes'] == -1)]
+    # When z_skew < 0 and we bought (dir_yes=+1), that's unfavorable
+    bought_neg_skew = df_skew[(df_skew['z_skew'] < -0.003) & (df_skew['dir_yes'] == 1)]
+
+    print(f"\n  FAVORABLE direction (trading WITH z-skew signal):")
+    print(f"    Bought when z_skew>+0.3¢:  {len(bought_pos_skew)} fills, avg markout=${bought_pos_skew['markout_5s'].mean():.4f}")
+    print(f"    Sold when z_skew<-0.3¢:    {len(sold_neg_skew)} fills, avg markout=${sold_neg_skew['markout_5s'].mean():.4f}")
+
+    print(f"\n  UNFAVORABLE direction (trading AGAINST z-skew signal):")
+    print(f"    Sold when z_skew>+0.3¢:    {len(sold_pos_skew)} fills, avg markout=${sold_pos_skew['markout_5s'].mean():.4f}")
+    print(f"    Bought when z_skew<-0.3¢:  {len(bought_neg_skew)} fills, avg markout=${bought_neg_skew['markout_5s'].mean():.4f}")
+
+    # Compare favorable vs unfavorable
+    favorable = pd.concat([bought_pos_skew, sold_neg_skew])
+    unfavorable = pd.concat([sold_pos_skew, bought_neg_skew])
+
+    if len(favorable) > 0 and len(unfavorable) > 0:
+        comparison = compare_groups(favorable['markout_5s'], unfavorable['markout_5s'],
+                                   "Favorable", "Unfavorable")
+        print(f"\n  Comparison: {comparison}")
+
+        if favorable['markout_5s'].mean() > unfavorable['markout_5s'].mean():
+            print(f"  ✅ Favorable direction fills are MORE profitable!")
+            print(f"     → Z-score skew is working as intended")
+        else:
+            print(f"  ❌ Favorable direction fills are NOT better")
+            print(f"     → Z-score skew may not be predictive")
+
+    # Test if z_skew improves overall performance
+    print(f"\nZ-skew effectiveness test:")
+    extreme_skew = df_skew[abs(df_skew['z_skew']) > 0.005]
+    neutral_skew = df_skew[abs(df_skew['z_skew']) <= 0.001]
+
+    if len(extreme_skew) > 0 and len(neutral_skew) > 0:
+        print(f"  Extreme skew (|skew|>0.5¢): {len(extreme_skew)} fills, avg markout=${extreme_skew['markout_5s'].mean():.4f}")
+        print(f"  Neutral skew (|skew|≤0.1¢): {len(neutral_skew)} fills, avg markout=${neutral_skew['markout_5s'].mean():.4f}")
+
+        comparison = compare_groups(extreme_skew['markout_5s'], neutral_skew['markout_5s'],
+                                   "Extreme Skew", "Neutral Skew")
+        print(f"  {comparison}")
+
+        if extreme_skew['markout_5s'].mean() > neutral_skew['markout_5s'].mean():
+            print(f"  ✅ Extreme skew fills are BETTER - z-skew adjustment is valuable!")
+        else:
+            print(f"  ⚠️  Extreme skew fills are NOT better - signal may be weak")
+
+    # Z-skew statistics
+    print(f"\nZ-skew statistics:")
+    print(f"  Mean z_skew:   {df_skew['z_skew'].mean():+.4f} cents")
+    print(f"  Std z_skew:    {df_skew['z_skew'].std():.4f} cents")
+    print(f"  Min/Max:       {df_skew['z_skew'].min():+.4f} / {df_skew['z_skew'].max():+.4f} cents")
+    print(f"  |skew|>0.5¢:   {(abs(df_skew['z_skew']) > 0.005).sum()} ({(abs(df_skew['z_skew']) > 0.005).sum()/len(df_skew)*100:.1f}%)")
+    print(f"  |skew|>1.0¢:   {(abs(df_skew['z_skew']) > 0.010).sum()} ({(abs(df_skew['z_skew']) > 0.010).sum()/len(df_skew)*100:.1f}%)")
+    print(f"  At cap (1.5¢): {(abs(df_skew['z_skew']) >= 0.0149).sum()} ({(abs(df_skew['z_skew']) >= 0.0149).sum()/len(df_skew)*100:.1f}%)")
+
+    # Compare z_skew vs zscore
+    if 'zscore' in df_skew.columns:
+        df_both = df_skew[(df_skew['zscore'].notna()) & (df_skew['z_skew'].notna())]
+        if len(df_both) > 30:
+            print(f"\nZ-skew vs Z-score correlation:")
+            skew_z_corr = df_both['z_skew'].corr(df_both['zscore'])
+            print(f"  z_skew ↔ zscore correlation: {skew_z_corr:.3f}")
+            if skew_z_corr > 0.7:
+                print(f"  ✅ Strong correlation - z_skew properly derived from z-score")
+            elif skew_z_corr > 0.3:
+                print(f"  ⚠️  Moderate correlation - delta modulation working")
+            else:
+                print(f"  ❌ Weak correlation - check z_skew calculation")
+
+
 def realized_vol_theo_analysis(df):
     """Test if realized vol theo has predictive power vs implied vol theo."""
     print("\n" + "=" * 80)
@@ -884,6 +1009,7 @@ def main():
     maker_vs_taker_analysis(df)  # NEW: Compare GTC vs IOC fills
     momentum_analysis(df)
     zscore_predictor_analysis(df)  # NEW: Analyze z-score predictor
+    z_skew_analysis(df)  # NEW: Analyze z-score skew (continuous fair value adjustment)
     theo_value_test(df)
     model_vs_market_test(df)
     adverse_selection_test(df)
