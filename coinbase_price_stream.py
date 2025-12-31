@@ -58,6 +58,10 @@ def _update_coinbase_rtds_zscore(coinbase_mid_usd: float):
         mean = np.mean(recent_spreads)
         std = np.std(recent_spreads)
 
+        # Cache spread std for use in z-score skew and IOC calculations
+        # This avoids recalculating np.std() in perform_trade() every time
+        global_state.coinbase_rtds_spread_std = std
+
         if std > MIN_STD_DEV:
             # Valid signal - calculate z-score
             global_state.coinbase_rtds_zscore = (spread - mean) / std
@@ -67,6 +71,7 @@ def _update_coinbase_rtds_zscore(coinbase_mid_usd: float):
     else:
         # Not enough data yet - cold start
         global_state.coinbase_rtds_zscore = 0.0
+        global_state.coinbase_rtds_spread_std = 0.0  # No valid std yet
 
 
 from util import update_binance_fair_value_for_market, update_fair_value_for_market, bs_binary_call, update_realized_vol
