@@ -312,7 +312,9 @@ MAX_IMBALANCE_ADJUSTMENT = 0   # max fair value nudge (1 cent)
 EARLY_CANCEL_OPTION_MOVE = .50  # .5 cent option move triggers immediate cancel # TODO: jitter may throw this off
 
 # Coinbase-RTDS z-score threshold (predictive edge detection when using RTDS)
-COINBASE_RTDS_ZSCORE_THRESHOLD = 0.70  # Skip vulnerable side when |z| > 0.80
+COINBASE_RTDS_ZSCORE_THRESHOLD = 0.70  # Skip vulnerable side when |z| > 0.70
+Z_SCORE_COMBINED_THRESHOLD = 0.40      # Combined threshold (half of main)
+Z_SKEW_COMBINED_THRESHOLD = 0.025      # 2.5¢ predicted option move threshold for combined rule
 
 # Z-score skew (continuous adjustment based on predicted RTDS movement)
 MAX_Z_SCORE_SKEW = 0.035 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
@@ -1061,8 +1063,8 @@ async def perform_trade(market_id: str):
     now_et = datetime.now(ZoneInfo("America/New_York"))
     minutes_to_expiry = (global_state.exp - now_et).total_seconds() / 60.0
 
-    if minutes_to_expiry < 3.0:
-        # Halve max position in final 3 minutes, round to nearest multiple of 5
+    if minutes_to_expiry < 5.0:
+        # Halve max position in final 5 minutes, round to nearest multiple of 5
         effective_max_position = round(MAX_POSITION / 2 / 5) * 5
         effective_max_position = max(5, effective_max_position)  # minimum of 5
         if VERBOSE:
@@ -1390,13 +1392,24 @@ async def perform_trade(market_id: str):
 
     if price_source == "RTDS":
         z = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
+        z_skew_by_market = getattr(global_state, 'z_skew_by_market', {})
+        z_skew = z_skew_by_market.get(market_id, 0.0)
 
-        if z > COINBASE_RTDS_ZSCORE_THRESHOLD:
+        # Combined rule: Skip vulnerable side if EITHER:
+        # 1) Z-score exceeds main threshold, OR
+        # 2) Z-score exceeds combined threshold AND z-skew predicts significant option move
+        should_skip_ask = (z > COINBASE_RTDS_ZSCORE_THRESHOLD) or \
+                          (z > Z_SCORE_COMBINED_THRESHOLD and z_skew > Z_SKEW_COMBINED_THRESHOLD)
+        should_skip_bid = (z < -COINBASE_RTDS_ZSCORE_THRESHOLD) or \
+                          (z < -Z_SCORE_COMBINED_THRESHOLD and z_skew < -Z_SKEW_COMBINED_THRESHOLD)
+
+        if should_skip_ask:
             # Coinbase HIGH → RTDS will rise → Cancel ASK if exists
             ask_order = wo.get("ask")
             if ask_order and isinstance(ask_order, dict) and ask_order.get("id"):
                 if not ask_order.get("cancel_requested"):
-                    print(f"[Z-SCORE] {z:.2f} > {COINBASE_RTDS_ZSCORE_THRESHOLD} → Canceling ASK (RTDS will rise)")
+                    reason = f"z={z:.2f}, z_skew={z_skew*100:.2f}¢"
+                    print(f"[Z-SCORE] {reason} → Canceling ASK (RTDS will rise)")
                     ask_order["cancel_requested"] = True
                     ask_order["cancel_requested_at"] = time.time()
                     await cancel_order_async(ask_order["id"])
@@ -1407,12 +1420,13 @@ async def perform_trade(market_id: str):
             # ASK already canceled or doesn't exist - quote BID only
             await manage_side("bid")
 
-        elif z < -COINBASE_RTDS_ZSCORE_THRESHOLD:
+        elif should_skip_bid:
             # Coinbase LOW → RTDS will fall → Cancel BID if exists
             bid_order = wo.get("bid")
             if bid_order and isinstance(bid_order, dict) and bid_order.get("id"):
                 if not bid_order.get("cancel_requested"):
-                    print(f"[Z-SCORE] {z:.2f} < {-COINBASE_RTDS_ZSCORE_THRESHOLD} → Canceling BID (RTDS will fall)")
+                    reason = f"z={z:.2f}, z_skew={z_skew*100:.2f}¢"
+                    print(f"[Z-SCORE] {reason} → Canceling BID (RTDS will fall)")
                     bid_order["cancel_requested"] = True
                     bid_order["cancel_requested_at"] = time.time()
                     await cancel_order_async(bid_order["id"])
