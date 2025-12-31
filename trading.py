@@ -289,7 +289,7 @@ MIN_TICKS_BUILD = 0   # ticks from touch when building position (more conservati
 MIN_TICKS_REDUCE = 0   # ticks from touch when reducing position (want to get filled)
 MIN_EDGE_TO_QUOTE = 0.02  # minimum edge (in price points) required to quote a side
 
-MIN_ORDER_INTERVAL = .30  # seconds → max 5 orders/sec per market+side, # changed this back to 1
+MIN_ORDER_INTERVAL = .40  # seconds → max 5 orders/sec per market+side, # changed this back to 1
 POST_FILL_COOLDOWN = 1.0  # seconds to pause quoting on a side after getting filled (GTC only)
 
 # Binance momentum adjustment
