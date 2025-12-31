@@ -273,7 +273,7 @@ MIN_EDGE_IOC = 0.07                  # 4 cents minimum edge required after predi
 IOC_COOLDOWN = 10.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
-BASE_QUOTE_SPREAD = 0.050             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
+BASE_QUOTE_SPREAD = 0.055             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 20
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
@@ -306,7 +306,7 @@ MAX_OPTION_SPREAD_MULT = 2.0      # Max spread multiplier cap (was 3.0)
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = .01   # max fair value nudge (1 cent)
+MAX_IMBALANCE_ADJUSTMENT = 0   # max fair value nudge (1 cent)
 
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .50  # .5 cent option move triggers immediate cancel # TODO: jitter may throw this off
@@ -315,7 +315,7 @@ EARLY_CANCEL_OPTION_MOVE = .50  # .5 cent option move triggers immediate cancel 
 COINBASE_RTDS_ZSCORE_THRESHOLD = 0.70  # Skip vulnerable side when |z| > 0.80
 
 # Z-score skew (continuous adjustment based on predicted RTDS movement)
-MAX_Z_SCORE_SKEW = 0.020 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
+MAX_Z_SCORE_SKEW = 0.030 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
 
 VERBOSE = False
 
