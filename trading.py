@@ -274,7 +274,7 @@ IOC_COOLDOWN = 5.0                  # Seconds between IOC orders (prevents spam 
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
 BASE_QUOTE_SPREAD = 0.040             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
-MAX_POSITION = 15
+MAX_POSITION = 30 # Upped this to 30 from 15!! scaling
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
 
