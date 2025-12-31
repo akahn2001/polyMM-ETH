@@ -448,6 +448,7 @@ async def main():
 
 
 if __name__ == "__main__":
+    print("ok")
     asyncio.run(main())
 #print("hello")
 #asyncio.run(main())
