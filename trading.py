@@ -273,12 +273,12 @@ MIN_EDGE_IOC = 0.07                  # 4 cents minimum edge required after predi
 IOC_COOLDOWN = 10.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
-BASE_QUOTE_SPREAD = 0.055             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
+BASE_QUOTE_SPREAD = 0.050             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
 MAX_POSITION = 20
 BASE_SIZE = 5.0
 #INV_SKEW_PER_SHARE = 0.00050
 
-SKEW_K = .65          # 0.3–1.0, start ~0.6
+SKEW_K = .60          # 0.3–1.0, start ~0.6
 SKEW_CAP = 0.04       # max skew in price points (5c)
 
 MIN_PRICE = 0.01
@@ -290,7 +290,7 @@ MIN_TICKS_REDUCE = 0   # ticks from touch when reducing position (want to get fi
 MIN_EDGE_TO_QUOTE = 0.02  # minimum edge (in price points) required to quote a side
 
 MIN_ORDER_INTERVAL = .40  # seconds → max 5 orders/sec per market+side, # changed this back to 1
-POST_FILL_COOLDOWN = 1.0  # seconds to pause quoting on a side after getting filled (GTC only)
+POST_FILL_COOLDOWN = .50  # seconds to pause quoting on a side after getting filled (GTC only)
 
 # Binance momentum adjustment
 USE_BINANCE_MOMENTUM = False  # Toggle to use Binance momentum for predictive quoting
@@ -315,7 +315,7 @@ EARLY_CANCEL_OPTION_MOVE = .50  # .5 cent option move triggers immediate cancel 
 COINBASE_RTDS_ZSCORE_THRESHOLD = 0.70  # Skip vulnerable side when |z| > 0.80
 
 # Z-score skew (continuous adjustment based on predicted RTDS movement)
-MAX_Z_SCORE_SKEW = 0.030 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
+MAX_Z_SCORE_SKEW = 0.035 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
 
 VERBOSE = False
 
