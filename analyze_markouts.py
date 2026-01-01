@@ -1070,6 +1070,40 @@ def main():
     → The observed effect might just be noise
     """)
     print("=" * 80)
+
+    # Market count summary
+    print("\n" + "=" * 80)
+    print("TRADING ACTIVITY SUMMARY")
+    print("=" * 80)
+
+    # Convert timestamp to datetime if it's a string
+    if 'timestamp' in df.columns:
+        df['dt'] = pd.to_datetime(df['timestamp'])
+
+        # Calculate time span
+        start_time = df['dt'].min()
+        end_time = df['dt'].max()
+        duration = end_time - start_time
+
+        print(f"\nTime period:")
+        print(f"  Start: {start_time}")
+        print(f"  End:   {end_time}")
+        print(f"  Duration: {duration}")
+
+        # Count unique 15-minute market periods
+        # Round timestamps down to 15-minute intervals
+        df['market_period'] = df['dt'].dt.floor('15min')
+        unique_markets = df['market_period'].nunique()
+
+        print(f"\nMarket activity:")
+        print(f"  Total fills: {len(df)}")
+        print(f"  Unique 15-min markets traded: {unique_markets}")
+        print(f"  Average fills per market: {len(df)/unique_markets:.1f}")
+    else:
+        print(f"\nTotal fills: {len(df)}")
+        print("  (No timestamp column - cannot calculate unique markets)")
+
+    print("=" * 80)
     print("Analysis complete!")
     print("=" * 80)
 
