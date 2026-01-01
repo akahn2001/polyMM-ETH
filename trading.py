@@ -306,7 +306,7 @@ MAX_OPTION_SPREAD_MULT = 1.0      # was 2.0, decreasing to 1.0 to turn this feat
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = 0   # max fair value nudge (1 cent)
+MAX_IMBALANCE_ADJUSTMENT = .015   # max fair value nudge (1 cent)
 
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .35  # .5 cent option move triggers immediate cancel # TODO: jitter may throw this off
