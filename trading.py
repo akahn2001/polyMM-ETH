@@ -267,15 +267,15 @@ async def reconcile_loop():
 # had .04 base width before, skew_k=1.0, min_order_interval=1.0, price_move_tol = .0035
 
 # Z-score predictive IOC parameters
-Z_SCORE_IOC_THRESHOLD = 20          # Minimum |z| to trigger predictive IOC (strong signal)- was .70- setting to 20 to disable IOC
+Z_SCORE_IOC_THRESHOLD = 25          # Minimum |z| to trigger predictive IOC (strong signal)- was .70- setting to 20 to disable IOC
 Z_IOC_OPTION_MOVE_THRESHOLD = 0.06   # 6 cents predicted option move required to justify crossing spread
 MIN_EDGE_IOC = 0.06                  # 4 cents minimum edge required after predicted move (prevents firing on stale signals)
 IOC_COOLDOWN = 5.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
 BASE_QUOTE_SPREAD = 0.040             # desired total spread # was .03 morning of 12/19, was .03 12/19 night
-MAX_POSITION = 30 # Upped this to 30 from 15!! scaling
-BASE_SIZE = 5.0
+MAX_POSITION = 60 # Upped this to 30 from 15!! scaling
+BASE_SIZE = 10.0 # Base size/max pos was 5 / 30
 #INV_SKEW_PER_SHARE = 0.00050
 
 SKEW_K = .60          # 0.3–1.0, start ~0.6
