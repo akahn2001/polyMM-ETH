@@ -301,7 +301,7 @@ MAX_MOMENTUM_ADJUSTMENT = 0.03  # Max price adjustment from momentum (caps at 3 
 OPTION_MOVE_LOOKBACK = 1.0        # Seconds to look back for BTC move
 OPTION_MOVE_THRESHOLD = 0.02      # 2 cents - start widening when option moved this much (was 0.02)
 OPTION_MOVE_SPREAD_SCALE = 0.25    # spread multiplier per cent above threshold (was 0.5)
-MAX_OPTION_SPREAD_MULT = 2.0      # Max spread multiplier cap (was 3.0)
+MAX_OPTION_SPREAD_MULT = 1.0      # was 2.0, decreasing to 1.0 to turn this feature off!
 
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
