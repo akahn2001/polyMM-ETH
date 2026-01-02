@@ -273,8 +273,8 @@ MIN_EDGE_IOC = 0.06                  # 4 cents minimum edge required after predi
 IOC_COOLDOWN = 5.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
-BASE_QUOTE_SPREAD = 0.050 # widened from .04 to .05
-MAX_POSITION = 30 # Upped this to 30 from 15!! scaling
+BASE_QUOTE_SPREAD = 0.060 # .05 base quote, 30 max position, 5 base size was working well
+MAX_POSITION = 50 # Upped this to 30 from 15!! scaling
 BASE_SIZE = 10.0 # Base size/max pos was 5 / 30
 #INV_SKEW_PER_SHARE = 0.00050
 
