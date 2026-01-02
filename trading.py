@@ -275,7 +275,7 @@ IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open pos
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
 BASE_QUOTE_SPREAD = 0.050 # widened from .04 to .05
 MAX_POSITION = 30 # Upped this to 30 from 15!! scaling
-BASE_SIZE = 5.0 # Base size/max pos was 5 / 30
+BASE_SIZE = 10.0 # Base size/max pos was 5 / 30
 #INV_SKEW_PER_SHARE = 0.00050
 
 SKEW_K = .60          # 0.3–1.0, start ~0.6
