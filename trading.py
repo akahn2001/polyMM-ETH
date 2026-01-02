@@ -274,7 +274,7 @@ IOC_COOLDOWN = 5.0                  # Seconds between IOC orders (prevents spam 
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
 BASE_QUOTE_SPREAD = 0.050 # .05 base quote, 30 max position, 5 base size was working well
-MAX_POSITION = 60 # Upped this to 30 from 15!! scaling
+MAX_POSITION = 70
 BASE_SIZE = 10.0 # Base size/max pos was 5 / 30
 #INV_SKEW_PER_SHARE = 0.00050
 
@@ -306,10 +306,10 @@ MAX_OPTION_SPREAD_MULT = 1.0      # was 2.0, decreasing to 1.0 to turn this feat
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = .025   # max fair value nudge (1 cent)
+MAX_IMBALANCE_ADJUSTMENT = .035   # 1/2/26: was .025, changing to .035
 
 # Early cancel threshold (option price sensitivity)
-EARLY_CANCEL_OPTION_MOVE = .35  # .5 cent option move triggers immediate cancel # TODO: jitter may throw this off
+EARLY_CANCEL_OPTION_MOVE = .30    # 1/2/26: was .35, changing to .30
 
 # Coinbase-RTDS z-score threshold (predictive edge detection when using RTDS)
 COINBASE_RTDS_ZSCORE_THRESHOLD = 0.70  # Skip vulnerable side when |z| > 0.70
