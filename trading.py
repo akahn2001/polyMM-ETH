@@ -22,6 +22,10 @@ RECONCILE_MAX_CANCEL_BATCH = 50  # keep batches mo  dest to avoid Cloudflare pai
 ioc_cooldown_lock = threading.Lock()  # Protects concurrent access to last_ioc_time
 last_ioc_time = {}  # {market_id: timestamp}
 
+# Per-market locks to prevent concurrent perform_trade() calls from double-counting capacity
+market_locks = {}  # {market_id: asyncio.Lock}
+market_locks_mutex = threading.Lock()  # Protects market_locks dict creation
+
 def tick_down(p: float, tick: float) -> float:
     return math.floor(p / tick + 1e-12) * tick
 
@@ -210,13 +214,22 @@ def pending_yes_from_open_orders(
     """
     Convert open orders into pending YES exposure for this market.
     Assumes open_orders entries contain: token_id/asset_id, side, size.
+
+    Also includes locally tracked working orders to prevent race conditions
+    where orders are placed but not yet reflected in API-sourced open_orders.
     """
     yes_token = global_state.condition_to_token_id[market_id]
     no_token  = global_state.REVERSE_TOKENS[yes_token]
 
     pending = 0.0
+    counted_order_ids = set()
 
+    # Count orders from API-sourced open_orders
     for o in open_orders:
+        order_id = o.get("id")
+        if order_id:
+            counted_order_ids.add(order_id)
+
         token = o.get("token_id") or o.get("asset_id") or o.get("tokenId") or o.get("assetId")
         side  = (o.get("side") or "").upper()
         size  = float(o.get("size") or o.get("original_size") or o.get("remaining_size") or 0.0)
@@ -235,6 +248,36 @@ def pending_yes_from_open_orders(
                 pending -= size
             elif side == "SELL":
                 pending += size
+
+    # Add locally tracked working orders if not already counted
+    # This handles race condition where order was just placed but API hasn't updated yet
+    if hasattr(global_state, "working_orders_by_market"):
+        wo = global_state.working_orders_by_market.get(market_id, {})
+        for side_key in ["bid", "ask"]:
+            order = wo.get(side_key)
+            if order and isinstance(order, dict):
+                order_id = order.get("id")
+                # Skip if already counted from open_orders
+                if order_id and order_id in counted_order_ids:
+                    continue
+
+                token = order.get("token")
+                size = order.get("size", 0)
+                side = (order.get("side") or "").upper()
+
+                if size <= 0:
+                    continue
+
+                if token == yes_token:
+                    if side == "BUY":
+                        pending += size
+                    elif side == "SELL":
+                        pending -= size
+                elif token == no_token:
+                    if side == "BUY":
+                        pending -= size
+                    elif side == "SELL":
+                        pending += size
 
     return pending
 
@@ -831,6 +874,20 @@ async def perform_trade(market_id: str):
     if market_id != global_state.active_market_id:
         return
 
+    # Acquire per-market lock to prevent concurrent perform_trade() calls from double-counting capacity
+    # This makes the entire "check position → calculate capacity → place orders" sequence atomic
+    with market_locks_mutex:
+        if market_id not in market_locks:
+            market_locks[market_id] = asyncio.Lock()
+
+    async with market_locks[market_id]:
+        await _perform_trade_locked(market_id)
+
+
+async def _perform_trade_locked(market_id: str):
+    """
+    Internal implementation of perform_trade() - assumes caller holds market lock.
+    """
     now = time.time()  # Cache time once for this call
     #return # TODO: return to prevent even printing
     if VERBOSE:
@@ -1165,10 +1222,12 @@ async def perform_trade(market_id: str):
     if VERBOSE:
         print(f"[MM] edges: edge_bid_yes={edge_bid_yes:.4f}, edge_ask_yes={edge_ask_yes:.4f}")
 
-    # Use filled_yes (not net_yes) for capacity to avoid phantom headroom from pending orders
-    # Pending orders that reduce position shouldn't create room for new position-increasing orders
-    max_buy_yes  = max(0.0, effective_max_position - filled_yes)
-    max_buy_no   = max(0.0, filled_yes + effective_max_position)
+    # Account for pending orders in the SAME direction to prevent position limit violations
+    # - pending_yes > 0: pending BUY orders (will increase YES position) → reduce buy capacity
+    # - pending_yes < 0: pending SELL orders (will decrease YES position) → reduce sell capacity
+    # We DON'T subtract opposite-direction pending to avoid "phantom headroom" (orders that haven't filled yet)
+    max_buy_yes  = max(0.0, effective_max_position - filled_yes - max(0, pending_yes))
+    max_buy_no   = max(0.0, filled_yes + effective_max_position - max(0, -pending_yes))
     if VERBOSE:
         print(f"[MM] capacity: max_buy_yes={max_buy_yes}, max_buy_no={max_buy_no}")
 
