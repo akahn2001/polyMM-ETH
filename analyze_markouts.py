@@ -117,6 +117,17 @@ def load_data():
             print("   Recommendation: Delete CSV and restart bot for clean data:")
             print(f"     del {MARKOUTS_FILE}\n")
 
+        # CRITICAL: Calculate per-share markouts
+        # The markout columns in CSV contain TOTAL PNL (already multiplied by qty)
+        # We need per-share markouts for proper averaging
+        for horizon in [1, 5, 15, 30, 60]:
+            col = f'markout_{horizon}s'
+            per_share_col = f'markout_{horizon}s_per_share'
+            if col in df.columns and 'qty' in df.columns:
+                df[per_share_col] = df[col] / df['qty']
+
+        print(f"✓ Calculated per-share markouts (dividing by quantity)\n")
+
         return df
 
     except Exception as e:
@@ -132,23 +143,37 @@ def overall_performance(df):
     print("OVERALL PERFORMANCE")
     print("=" * 80)
 
+    total_shares = df['qty'].sum()
     print(f"Total fills: {len(df)}")
+    print(f"Total shares traded: {total_shares:.0f}")
     print(f"Buy fills: {(df['dir_yes'] == 1).sum()}")
     print(f"Sell fills: {(df['dir_yes'] == -1).sum()}")
 
-    print(f"\nMarkout Performance (with significance tests):")
+    print(f"\n{'='*80}")
+    print(f"PER-SHARE MARKOUT PERFORMANCE (Edge in cents per share)")
+    print(f"{'='*80}")
     print(f"  Legend: *** p<0.01, ** p<0.05, * p<0.10")
     print()
     for horizon in [1, 5, 15, 30, 60]:
+        per_share_col = f'markout_{horizon}s_per_share'
+        if per_share_col in df.columns:
+            avg_per_share = df[per_share_col].mean()
+            median_per_share = df[per_share_col].median()
+            hit_rate = (df[per_share_col] > 0).sum() / len(df) * 100
+            _, p_val, is_sig, interp = significance_test(df[per_share_col], null_value=0)
+            print(f"  {horizon}s: mean={avg_per_share:.5f} ({'*** ' if p_val < 0.01 else '** ' if p_val < 0.05 else '* ' if p_val < 0.10 else ''}p={p_val:.4f})")
+            print(f"       median={median_per_share:.5f}, hit rate={hit_rate:.1f}%")
+
+    print(f"\n{'='*80}")
+    print(f"TOTAL PNL (Cumulative profit across all fills)")
+    print(f"{'='*80}")
+    for horizon in [1, 5, 15, 30, 60]:
         col = f'markout_{horizon}s'
         if col in df.columns:
-            avg = df[col].mean()
-            median = df[col].median()
-            hit_rate = (df[col] > 0).sum() / len(df) * 100
-            total = df[col].sum()
-            _, p_val, is_sig, interp = significance_test(df[col], null_value=0)
-            print(f"  {horizon}s: {interp}")
-            print(f"       median=${median:.4f}, hit={hit_rate:.1f}%, total=${total:.2f}")
+            total_pnl = df[col].sum()
+            per_share_col = f'markout_{horizon}s_per_share'
+            avg_per_share = df[per_share_col].mean() if per_share_col in df.columns else 0
+            print(f"  {horizon}s: Total PNL = ${total_pnl:+.2f}  (avg {avg_per_share*100:+.2f}¢/share × {total_shares:.0f} shares)")
 
     print(f"\nDelta Check:")
     print(f"  Avg delta: {df['delta'].mean():.6f}")
@@ -172,7 +197,7 @@ def momentum_analysis(df):
     # Positive when trading WITH momentum (buy when rising, sell when falling)
     df['aligned_momentum'] = df['momentum'] * df['dir_yes']
 
-    mom_corr = df['aligned_momentum'].corr(df['markout_5s'])
+    mom_corr = df['aligned_momentum'].corr(df['markout_5s_per_share'])
     print(f"Directionally-adjusted Momentum → Markout correlation: {mom_corr:.3f}")
     if mom_corr > 0.1:
         print("  ✅ Positive correlation - momentum has predictive power!")
@@ -188,30 +213,30 @@ def momentum_analysis(df):
     falling = df[df['momentum'] < -10]
     flat = df[abs(df['momentum']) <= 10]
 
-    print(f"  Rising (>$10):   {len(rising):3d} fills, avg markout=${rising['markout_5s'].mean():.4f}")
-    _, _, _, rising_sig = significance_test(rising['markout_5s']) if len(rising) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
+    print(f"  Rising (>$10):   {len(rising):3d} fills, avg markout=${rising['markout_5s_per_share'].mean():.4f}")
+    _, _, _, rising_sig = significance_test(rising['markout_5s_per_share']) if len(rising) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
     if rising_sig: print(f"                   {rising_sig}")
 
-    print(f"  Falling (<-$10): {len(falling):3d} fills, avg markout=${falling['markout_5s'].mean():.4f}")
-    _, _, _, falling_sig = significance_test(falling['markout_5s']) if len(falling) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
+    print(f"  Falling (<-$10): {len(falling):3d} fills, avg markout=${falling['markout_5s_per_share'].mean():.4f}")
+    _, _, _, falling_sig = significance_test(falling['markout_5s_per_share']) if len(falling) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
     if falling_sig: print(f"                   {falling_sig}")
 
-    print(f"  Flat (±$10):     {len(flat):3d} fills, avg markout=${flat['markout_5s'].mean():.4f}")
-    _, _, _, flat_sig = significance_test(flat['markout_5s']) if len(flat) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
+    print(f"  Flat (±$10):     {len(flat):3d} fills, avg markout=${flat['markout_5s_per_share'].mean():.4f}")
+    _, _, _, flat_sig = significance_test(flat['markout_5s_per_share']) if len(flat) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
     if flat_sig: print(f"                   {flat_sig}")
 
     # Should momentum fills have better markouts?
     momentum_fills = df[abs(df['momentum']) > 10]
     flat_fills = df[abs(df['momentum']) <= 10]
 
-    print(f"\n  Momentum fills (|mom|>$10): avg markout=${momentum_fills['markout_5s'].mean():.4f}")
-    print(f"  Flat fills (|mom|≤$10):     avg markout=${flat_fills['markout_5s'].mean():.4f}")
+    print(f"\n  Momentum fills (|mom|>$10): avg markout=${momentum_fills['markout_5s_per_share'].mean():.4f}")
+    print(f"  Flat fills (|mom|≤$10):     avg markout=${flat_fills['markout_5s_per_share'].mean():.4f}")
 
     # Statistical comparison
-    comparison = compare_groups(momentum_fills['markout_5s'], flat_fills['markout_5s'], "Momentum", "Flat")
+    comparison = compare_groups(momentum_fills['markout_5s_per_share'], flat_fills['markout_5s_per_share'], "Momentum", "Flat")
     print(f"  Comparison: {comparison}")
 
-    if momentum_fills['markout_5s'].mean() > flat_fills['markout_5s'].mean():
+    if momentum_fills['markout_5s_per_share'].mean() > flat_fills['markout_5s_per_share'].mean():
         print("  ✅ Momentum fills are more profitable!")
     else:
         print("  ❌ Momentum fills are WORSE - strategy may be broken")
@@ -228,7 +253,7 @@ def theo_value_test(df):
         return
 
     # Edge vs theo correlation with markouts
-    edge_corr = df['edge_vs_theo'].corr(df['markout_5s'])
+    edge_corr = df['edge_vs_theo'].corr(df['markout_5s_per_share'])
     print(f"Edge vs Theo → Markout correlation: {edge_corr:.3f}")
     if edge_corr > 0.2:
         print("  ✅ Strong positive correlation - theo has value!")
@@ -245,7 +270,7 @@ def theo_value_test(df):
     for bucket in df['edge_bucket'].cat.categories:
         subset = df[df['edge_bucket'] == bucket]
         if len(subset) > 0:
-            print(f"  {bucket:12s}: {len(subset):3d} fills, avg markout=${subset['markout_5s'].mean():.4f}")
+            print(f"  {bucket:12s}: {len(subset):3d} fills, avg markout=${subset['markout_5s_per_share'].mean():.4f}")
 
     print(f"\n  Expected: Large +ve edge → positive markouts")
     print(f"  Expected: Large -ve edge → negative markouts")
@@ -261,12 +286,12 @@ def model_vs_market_test(df):
     model_thinks_rich = df[(df['model_vs_market'] < -0.02) & (df['dir_yes'] == -1)]
 
     print(f"Bought when model said underpriced (model>market by >2¢):")
-    print(f"  {len(model_thinks_cheap)} fills, avg markout=${model_thinks_cheap['markout_5s'].mean():.4f}")
+    print(f"  {len(model_thinks_cheap)} fills, avg markout=${model_thinks_cheap['markout_5s_per_share'].mean():.4f}")
 
     print(f"\nSold when model said overpriced (model<market by >2¢):")
-    print(f"  {len(model_thinks_rich)} fills, avg markout=${model_thinks_rich['markout_5s'].mean():.4f}")
+    print(f"  {len(model_thinks_rich)} fills, avg markout=${model_thinks_rich['markout_5s_per_share'].mean():.4f}")
 
-    if len(model_thinks_cheap) > 0 and model_thinks_cheap['markout_5s'].mean() > 0:
+    if len(model_thinks_cheap) > 0 and model_thinks_cheap['markout_5s_per_share'].mean() > 0:
         print("  ✅ Model contrarian calls are profitable!")
     else:
         print("  ❌ Model contrarian calls are NOT profitable")
@@ -283,15 +308,15 @@ def adverse_selection_test(df):
     neutral = df[abs(df['edge_vs_fair']) <= 0.005]
 
     print(f"Fills where you paid up (edge_vs_fair < -0.5¢):")
-    print(f"  {len(paid_up)} fills, avg markout=${paid_up['markout_5s'].mean():.4f}")
-    if paid_up['markout_5s'].mean() < 0:
+    print(f"  {len(paid_up)} fills, avg markout=${paid_up['markout_5s_per_share'].mean():.4f}")
+    if paid_up['markout_5s_per_share'].mean() < 0:
         print("  ❌ Paid up fills have negative markouts - getting picked off!")
 
     print(f"\nFills where you got edge (edge_vs_fair > +0.5¢):")
-    print(f"  {len(got_edge)} fills, avg markout=${got_edge['markout_5s'].mean():.4f}")
+    print(f"  {len(got_edge)} fills, avg markout=${got_edge['markout_5s_per_share'].mean():.4f}")
 
     print(f"\nFills at fair value (|edge_vs_fair| ≤ 0.5¢):")
-    print(f"  {len(neutral)} fills, avg markout=${neutral['markout_5s'].mean():.4f}")
+    print(f"  {len(neutral)} fills, avg markout=${neutral['markout_5s_per_share'].mean():.4f}")
 
 def inventory_analysis(df):
     """Analyze inventory and position management."""
@@ -314,10 +339,10 @@ def inventory_analysis(df):
     building = df[df['increasing_long'] | df['increasing_short']]
     reducing = df[df['reducing']]
 
-    print(f"\nBuilding position: {len(building)} fills, avg markout=${building['markout_5s'].mean():.4f}")
-    print(f"Reducing position: {len(reducing)} fills, avg markout=${reducing['markout_5s'].mean():.4f}")
+    print(f"\nBuilding position: {len(building)} fills, avg markout=${building['markout_5s_per_share'].mean():.4f}")
+    print(f"Reducing position: {len(reducing)} fills, avg markout=${reducing['markout_5s_per_share'].mean():.4f}")
 
-    if building['markout_5s'].mean() < reducing['markout_5s'].mean():
+    if building['markout_5s_per_share'].mean() < reducing['markout_5s_per_share'].mean():
         print("  ❌ Worse markouts when building - getting run over on entries")
     else:
         print("  ✅ Better markouts when building - good position management")
@@ -331,19 +356,19 @@ def directional_bias(df):
     buys = df[df['dir_yes'] == 1]
     sells = df[df['dir_yes'] == -1]
 
-    print(f"Buy performance:  {len(buys)} fills, avg markout=${buys['markout_5s'].mean():.4f}")
-    _, _, _, buy_sig = significance_test(buys['markout_5s']) if len(buys) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
+    print(f"Buy performance:  {len(buys)} fills, avg markout=${buys['markout_5s_per_share'].mean():.4f}")
+    _, _, _, buy_sig = significance_test(buys['markout_5s_per_share']) if len(buys) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
     if buy_sig: print(f"                  {buy_sig}")
 
-    print(f"Sell performance: {len(sells)} fills, avg markout=${sells['markout_5s'].mean():.4f}")
-    _, _, _, sell_sig = significance_test(sells['markout_5s']) if len(sells) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
+    print(f"Sell performance: {len(sells)} fills, avg markout=${sells['markout_5s_per_share'].mean():.4f}")
+    _, _, _, sell_sig = significance_test(sells['markout_5s_per_share']) if len(sells) >= MIN_SAMPLES_FOR_SIGNIFICANCE else (None, None, False, "")
     if sell_sig: print(f"                  {sell_sig}")
 
     # Statistical comparison
-    comparison = compare_groups(buys['markout_5s'], sells['markout_5s'], "Buys", "Sells")
+    comparison = compare_groups(buys['markout_5s_per_share'], sells['markout_5s_per_share'], "Buys", "Sells")
     print(f"\nBuy vs Sell comparison: {comparison}")
 
-    if abs(buys['markout_5s'].mean() - sells['markout_5s'].mean()) > 0.005:
+    if abs(buys['markout_5s_per_share'].mean() - sells['markout_5s_per_share'].mean()) > 0.005:
         print(f"  ⚠️  Large difference - one side is much worse!")
     else:
         print(f"  ✅ Balanced performance on both sides")
@@ -364,13 +389,13 @@ def volatility_spread_analysis(df):
     low_vol = df[df['momentum_volatility'] <= 10]
 
     print(f"Performance by momentum volatility:")
-    print(f"  Low volatility (≤$10):  {len(low_vol):3d} fills, avg markout=${low_vol['markout_5s'].mean():.4f}")
-    print(f"  Med volatility ($10-20): {len(med_vol):3d} fills, avg markout=${med_vol['markout_5s'].mean():.4f}")
-    print(f"  High volatility (>$20):  {len(high_vol):3d} fills, avg markout=${high_vol['markout_5s'].mean():.4f}")
+    print(f"  Low volatility (≤$10):  {len(low_vol):3d} fills, avg markout=${low_vol['markout_5s_per_share'].mean():.4f}")
+    print(f"  Med volatility ($10-20): {len(med_vol):3d} fills, avg markout=${med_vol['markout_5s_per_share'].mean():.4f}")
+    print(f"  High volatility (>$20):  {len(high_vol):3d} fills, avg markout=${high_vol['markout_5s_per_share'].mean():.4f}")
 
     # Check if high volatility fills have worse markouts (justifying wider spreads)
     if len(high_vol) > 0 and len(low_vol) > 0:
-        if high_vol['markout_5s'].mean() < low_vol['markout_5s'].mean():
+        if high_vol['markout_5s_per_share'].mean() < low_vol['markout_5s_per_share'].mean():
             print(f"  ❌ High volatility fills are WORSE - dynamic spread helps!")
             print(f"     Widening spread during volatile times should improve performance")
         else:
@@ -380,7 +405,7 @@ def volatility_spread_analysis(df):
     if len(high_vol) > 0:
         paid_up_in_vol = high_vol[high_vol['edge_vs_fair'] < -0.005]
         print(f"\n  During high volatility:")
-        print(f"    Paid up (edge<-0.5¢): {len(paid_up_in_vol)} fills, avg markout=${paid_up_in_vol['markout_5s'].mean():.4f}")
+        print(f"    Paid up (edge<-0.5¢): {len(paid_up_in_vol)} fills, avg markout=${paid_up_in_vol['markout_5s_per_share'].mean():.4f}")
         if len(paid_up_in_vol) > 0:
             print(f"    ⚠️  Getting picked off during volatile periods - widen spreads!")
 
@@ -406,7 +431,7 @@ def book_imbalance_analysis(df):
     # Positive when trading WITH the flow (buy when bid>ask, sell when ask>bid)
     df_imb['aligned_imbalance'] = df_imb['book_imbalance'] * df_imb['dir_yes']
 
-    imb_corr = df_imb['aligned_imbalance'].corr(df_imb['markout_5s'])
+    imb_corr = df_imb['aligned_imbalance'].corr(df_imb['markout_5s_per_share'])
     print(f"Directionally-adjusted Book Imbalance → Markout correlation: {imb_corr:.3f}")
     if imb_corr > 0.1:
         print("  ✅ Positive correlation - imbalance has predictive power!")
@@ -421,9 +446,9 @@ def book_imbalance_analysis(df):
     strong_ask = df_imb[df_imb['book_imbalance'] < -0.3]
     neutral = df_imb[abs(df_imb['book_imbalance']) <= 0.3]
 
-    print(f"  Strong bid imbalance (>0.3):  {len(strong_bid):3d} fills, avg markout=${strong_bid['markout_5s'].mean():.4f}")
-    print(f"  Neutral (±0.3):               {len(neutral):3d} fills, avg markout=${neutral['markout_5s'].mean():.4f}")
-    print(f"  Strong ask imbalance (<-0.3): {len(strong_ask):3d} fills, avg markout=${strong_ask['markout_5s'].mean():.4f}")
+    print(f"  Strong bid imbalance (>0.3):  {len(strong_bid):3d} fills, avg markout=${strong_bid['markout_5s_per_share'].mean():.4f}")
+    print(f"  Neutral (±0.3):               {len(neutral):3d} fills, avg markout=${neutral['markout_5s_per_share'].mean():.4f}")
+    print(f"  Strong ask imbalance (<-0.3): {len(strong_ask):3d} fills, avg markout=${strong_ask['markout_5s_per_share'].mean():.4f}")
 
     # Check if trading WITH imbalance is better than against
     # When imbalance > 0 and we buy (dir_yes = 1), we're trading WITH the flow
@@ -433,14 +458,14 @@ def book_imbalance_analysis(df):
     against_flow = df_imb[((df_imb['book_imbalance'] > 0.2) & (df_imb['dir_yes'] == -1)) |
                           ((df_imb['book_imbalance'] < -0.2) & (df_imb['dir_yes'] == 1))]
 
-    print(f"\nTrading WITH order flow:     {len(with_flow):3d} fills, avg markout=${with_flow['markout_5s'].mean():.4f}")
-    print(f"Trading AGAINST order flow:  {len(against_flow):3d} fills, avg markout=${against_flow['markout_5s'].mean():.4f}")
+    print(f"\nTrading WITH order flow:     {len(with_flow):3d} fills, avg markout=${with_flow['markout_5s_per_share'].mean():.4f}")
+    print(f"Trading AGAINST order flow:  {len(against_flow):3d} fills, avg markout=${against_flow['markout_5s_per_share'].mean():.4f}")
 
     if len(with_flow) > 0 and len(against_flow) > 0:
-        comparison = compare_groups(with_flow['markout_5s'], against_flow['markout_5s'], "With Flow", "Against Flow")
+        comparison = compare_groups(with_flow['markout_5s_per_share'], against_flow['markout_5s_per_share'], "With Flow", "Against Flow")
         print(f"  Comparison: {comparison}")
 
-        if with_flow['markout_5s'].mean() > against_flow['markout_5s'].mean():
+        if with_flow['markout_5s_per_share'].mean() > against_flow['markout_5s_per_share'].mean():
             print("  ✅ Trading WITH order flow is more profitable!")
             print("     → Book imbalance adjustment is helping")
         else:
@@ -477,7 +502,7 @@ def zscore_predictor_analysis(df):
     # Positive when trading WITH the signal (buy when z>0, sell when z<0)
     df_z['aligned_zscore'] = df_z['zscore'] * df_z['dir_yes']
 
-    z_corr = df_z['aligned_zscore'].corr(df_z['markout_5s'])
+    z_corr = df_z['aligned_zscore'].corr(df_z['markout_5s_per_share'])
     print(f"\nDirectionally-adjusted Z-score → Markout correlation: {z_corr:.3f}")
     if z_corr > 0.1:
         print("  ✅ Positive correlation - z-score has predictive power!")
@@ -500,11 +525,11 @@ def zscore_predictor_analysis(df):
     med_neg_z = df_z[(df_z['zscore'] < -0.3) & (df_z['zscore'] >= -0.8)]
     high_neg_z = df_z[df_z['zscore'] < -0.8]
 
-    print(f"  High +z (>0.8):     {len(high_pos_z):3d} fills, avg markout=${high_pos_z['markout_5s'].mean():.4f}")
-    print(f"  Med +z (0.3-0.8):   {len(med_pos_z):3d} fills, avg markout=${med_pos_z['markout_5s'].mean():.4f}")
-    print(f"  Neutral (±0.3):     {len(neutral_z):3d} fills, avg markout=${neutral_z['markout_5s'].mean():.4f}")
-    print(f"  Med -z (-0.8--0.3): {len(med_neg_z):3d} fills, avg markout=${med_neg_z['markout_5s'].mean():.4f}")
-    print(f"  High -z (<-0.8):    {len(high_neg_z):3d} fills, avg markout=${high_neg_z['markout_5s'].mean():.4f}")
+    print(f"  High +z (>0.8):     {len(high_pos_z):3d} fills, avg markout=${high_pos_z['markout_5s_per_share'].mean():.4f}")
+    print(f"  Med +z (0.3-0.8):   {len(med_pos_z):3d} fills, avg markout=${med_pos_z['markout_5s_per_share'].mean():.4f}")
+    print(f"  Neutral (±0.3):     {len(neutral_z):3d} fills, avg markout=${neutral_z['markout_5s_per_share'].mean():.4f}")
+    print(f"  Med -z (-0.8--0.3): {len(med_neg_z):3d} fills, avg markout=${med_neg_z['markout_5s_per_share'].mean():.4f}")
+    print(f"  High -z (<-0.8):    {len(high_neg_z):3d} fills, avg markout=${high_neg_z['markout_5s_per_share'].mean():.4f}")
 
     # Z-score predictor logic test
     print(f"\nZ-score predictor effectiveness:")
@@ -514,14 +539,14 @@ def zscore_predictor_analysis(df):
     neutral_z_fills = df_z[abs(df_z['zscore']) <= 0.3]
 
     if len(extreme_z) > 0 and len(neutral_z_fills) > 0:
-        print(f"  Extreme z (|z|>0.8): {len(extreme_z)} fills, avg markout=${extreme_z['markout_5s'].mean():.4f}")
-        print(f"  Neutral z (|z|≤0.3): {len(neutral_z_fills)} fills, avg markout=${neutral_z_fills['markout_5s'].mean():.4f}")
+        print(f"  Extreme z (|z|>0.8): {len(extreme_z)} fills, avg markout=${extreme_z['markout_5s_per_share'].mean():.4f}")
+        print(f"  Neutral z (|z|≤0.3): {len(neutral_z_fills)} fills, avg markout=${neutral_z_fills['markout_5s_per_share'].mean():.4f}")
 
-        comparison = compare_groups(extreme_z['markout_5s'], neutral_z_fills['markout_5s'],
+        comparison = compare_groups(extreme_z['markout_5s_per_share'], neutral_z_fills['markout_5s_per_share'],
                                    "Extreme Z", "Neutral Z")
         print(f"  {comparison}")
 
-        if extreme_z['markout_5s'].mean() < neutral_z_fills['markout_5s'].mean():
+        if extreme_z['markout_5s_per_share'].mean() < neutral_z_fills['markout_5s_per_share'].mean():
             print(f"  ✅ Extreme z-score fills are WORSE - predictor is valuable!")
             print(f"     → Canceling during extreme z-score should improve performance")
         else:
@@ -545,12 +570,12 @@ def zscore_predictor_analysis(df):
     bought_low_z = df_z[(df_z['zscore'] < -0.8) & (df_z['dir_yes'] == 1)]
 
     print(f"\n  CORRECT side (should be profitable):")
-    print(f"    Bought when z>0.8 (RTDS will rise):  {len(bought_high_z)} fills, avg markout=${bought_high_z['markout_5s'].mean():.4f}")
-    print(f"    Sold when z<-0.8 (RTDS will fall):   {len(sold_low_z)} fills, avg markout=${sold_low_z['markout_5s'].mean():.4f}")
+    print(f"    Bought when z>0.8 (RTDS will rise):  {len(bought_high_z)} fills, avg markout=${bought_high_z['markout_5s_per_share'].mean():.4f}")
+    print(f"    Sold when z<-0.8 (RTDS will fall):   {len(sold_low_z)} fills, avg markout=${sold_low_z['markout_5s_per_share'].mean():.4f}")
 
     print(f"\n  WRONG side (should be canceled by z-score logic):")
-    print(f"    Sold when z>0.8 (vulnerable ASK):    {len(sold_high_z)} fills, avg markout=${sold_high_z['markout_5s'].mean():.4f}")
-    print(f"    Bought when z<-0.8 (vulnerable BID): {len(bought_low_z)} fills, avg markout=${bought_low_z['markout_5s'].mean():.4f}")
+    print(f"    Sold when z>0.8 (vulnerable ASK):    {len(sold_high_z)} fills, avg markout=${sold_high_z['markout_5s_per_share'].mean():.4f}")
+    print(f"    Bought when z<-0.8 (vulnerable BID): {len(bought_low_z)} fills, avg markout=${bought_low_z['markout_5s_per_share'].mean():.4f}")
 
     if len(sold_high_z) > 0 or len(bought_low_z) > 0:
         print(f"\n  ⚠️  WARNING: Getting filled on VULNERABLE side despite cancel logic!")
@@ -565,11 +590,11 @@ def zscore_predictor_analysis(df):
     wrong_side = pd.concat([sold_high_z, bought_low_z])
 
     if len(correct_side) > 0 and len(wrong_side) > 0:
-        comparison = compare_groups(correct_side['markout_5s'], wrong_side['markout_5s'],
+        comparison = compare_groups(correct_side['markout_5s_per_share'], wrong_side['markout_5s_per_share'],
                                    "Correct Side", "Wrong Side")
         print(f"\n  Comparison: {comparison}")
 
-        if correct_side['markout_5s'].mean() > wrong_side['markout_5s'].mean():
+        if correct_side['markout_5s_per_share'].mean() > wrong_side['markout_5s_per_share'].mean():
             print(f"  ✅ Correct side fills are MORE profitable!")
             print(f"     → Z-score predictor is working as intended")
         else:
@@ -610,7 +635,7 @@ def z_skew_analysis(df):
     # Positive when trading WITH the signal (buy when z_skew>0, sell when z_skew<0)
     df_skew['aligned_z_skew'] = df_skew['z_skew'] * df_skew['dir_yes']
 
-    skew_corr = df_skew['aligned_z_skew'].corr(df_skew['markout_5s'])
+    skew_corr = df_skew['aligned_z_skew'].corr(df_skew['markout_5s_per_share'])
     print(f"\nDirectionally-adjusted z-skew → Markout correlation: {skew_corr:.3f}")
     if skew_corr > 0.15:
         print("  ✅ Strong positive correlation - z-skew is predictive!")
@@ -632,11 +657,11 @@ def z_skew_analysis(df):
     med_neg = df_skew[(df_skew['z_skew'] < -0.001) & (df_skew['z_skew'] >= -0.005)]
     high_neg = df_skew[df_skew['z_skew'] < -0.005]
 
-    print(f"  High +skew (>0.5¢):     {len(high_pos):3d} fills, avg markout=${high_pos['markout_5s'].mean():.4f}")
-    print(f"  Med +skew (0.1-0.5¢):   {len(med_pos):3d} fills, avg markout=${med_pos['markout_5s'].mean():.4f}")
-    print(f"  Neutral (±0.1¢):        {len(neutral):3d} fills, avg markout=${neutral['markout_5s'].mean():.4f}")
-    print(f"  Med -skew (-0.5--0.1¢): {len(med_neg):3d} fills, avg markout=${med_neg['markout_5s'].mean():.4f}")
-    print(f"  High -skew (<-0.5¢):    {len(high_neg):3d} fills, avg markout=${high_neg['markout_5s'].mean():.4f}")
+    print(f"  High +skew (>0.5¢):     {len(high_pos):3d} fills, avg markout=${high_pos['markout_5s_per_share'].mean():.4f}")
+    print(f"  Med +skew (0.1-0.5¢):   {len(med_pos):3d} fills, avg markout=${med_pos['markout_5s_per_share'].mean():.4f}")
+    print(f"  Neutral (±0.1¢):        {len(neutral):3d} fills, avg markout=${neutral['markout_5s_per_share'].mean():.4f}")
+    print(f"  Med -skew (-0.5--0.1¢): {len(med_neg):3d} fills, avg markout=${med_neg['markout_5s_per_share'].mean():.4f}")
+    print(f"  High -skew (<-0.5¢):    {len(high_neg):3d} fills, avg markout=${high_neg['markout_5s_per_share'].mean():.4f}")
 
     # Directional z_skew test
     print(f"\nDirectional z_skew test:")
@@ -656,23 +681,23 @@ def z_skew_analysis(df):
     bought_neg_skew = df_skew[(df_skew['z_skew'] < -0.003) & (df_skew['dir_yes'] == 1)]
 
     print(f"\n  FAVORABLE direction (trading WITH z-skew signal):")
-    print(f"    Bought when z_skew>+0.3¢:  {len(bought_pos_skew)} fills, avg markout=${bought_pos_skew['markout_5s'].mean():.4f}")
-    print(f"    Sold when z_skew<-0.3¢:    {len(sold_neg_skew)} fills, avg markout=${sold_neg_skew['markout_5s'].mean():.4f}")
+    print(f"    Bought when z_skew>+0.3¢:  {len(bought_pos_skew)} fills, avg markout=${bought_pos_skew['markout_5s_per_share'].mean():.4f}")
+    print(f"    Sold when z_skew<-0.3¢:    {len(sold_neg_skew)} fills, avg markout=${sold_neg_skew['markout_5s_per_share'].mean():.4f}")
 
     print(f"\n  UNFAVORABLE direction (trading AGAINST z-skew signal):")
-    print(f"    Sold when z_skew>+0.3¢:    {len(sold_pos_skew)} fills, avg markout=${sold_pos_skew['markout_5s'].mean():.4f}")
-    print(f"    Bought when z_skew<-0.3¢:  {len(bought_neg_skew)} fills, avg markout=${bought_neg_skew['markout_5s'].mean():.4f}")
+    print(f"    Sold when z_skew>+0.3¢:    {len(sold_pos_skew)} fills, avg markout=${sold_pos_skew['markout_5s_per_share'].mean():.4f}")
+    print(f"    Bought when z_skew<-0.3¢:  {len(bought_neg_skew)} fills, avg markout=${bought_neg_skew['markout_5s_per_share'].mean():.4f}")
 
     # Compare favorable vs unfavorable
     favorable = pd.concat([bought_pos_skew, sold_neg_skew])
     unfavorable = pd.concat([sold_pos_skew, bought_neg_skew])
 
     if len(favorable) > 0 and len(unfavorable) > 0:
-        comparison = compare_groups(favorable['markout_5s'], unfavorable['markout_5s'],
+        comparison = compare_groups(favorable['markout_5s_per_share'], unfavorable['markout_5s_per_share'],
                                    "Favorable", "Unfavorable")
         print(f"\n  Comparison: {comparison}")
 
-        if favorable['markout_5s'].mean() > unfavorable['markout_5s'].mean():
+        if favorable['markout_5s_per_share'].mean() > unfavorable['markout_5s_per_share'].mean():
             print(f"  ✅ Favorable direction fills are MORE profitable!")
             print(f"     → Z-score skew is working as intended")
         else:
@@ -685,14 +710,14 @@ def z_skew_analysis(df):
     neutral_skew = df_skew[abs(df_skew['z_skew']) <= 0.001]
 
     if len(extreme_skew) > 0 and len(neutral_skew) > 0:
-        print(f"  Extreme skew (|skew|>0.5¢): {len(extreme_skew)} fills, avg markout=${extreme_skew['markout_5s'].mean():.4f}")
-        print(f"  Neutral skew (|skew|≤0.1¢): {len(neutral_skew)} fills, avg markout=${neutral_skew['markout_5s'].mean():.4f}")
+        print(f"  Extreme skew (|skew|>0.5¢): {len(extreme_skew)} fills, avg markout=${extreme_skew['markout_5s_per_share'].mean():.4f}")
+        print(f"  Neutral skew (|skew|≤0.1¢): {len(neutral_skew)} fills, avg markout=${neutral_skew['markout_5s_per_share'].mean():.4f}")
 
-        comparison = compare_groups(extreme_skew['markout_5s'], neutral_skew['markout_5s'],
+        comparison = compare_groups(extreme_skew['markout_5s_per_share'], neutral_skew['markout_5s_per_share'],
                                    "Extreme Skew", "Neutral Skew")
         print(f"  {comparison}")
 
-        if extreme_skew['markout_5s'].mean() > neutral_skew['markout_5s'].mean():
+        if extreme_skew['markout_5s_per_share'].mean() > neutral_skew['markout_5s_per_share'].mean():
             print(f"  ✅ Extreme skew fills are BETTER - z-skew adjustment is valuable!")
         else:
             print(f"  ⚠️  Extreme skew fills are NOT better - signal may be weak")
@@ -757,8 +782,8 @@ def realized_vol_theo_analysis(df):
     # Compare correlations: which theo predicts markouts better?
     print(f"\nWhich theo predicts markouts better?")
 
-    implied_corr = df_vol['edge_vs_theo'].corr(df_vol['markout_5s'])
-    realized_corr = df_vol['edge_vs_realized_theo'].corr(df_vol['markout_5s'])
+    implied_corr = df_vol['edge_vs_theo'].corr(df_vol['markout_5s_per_share'])
+    realized_corr = df_vol['edge_vs_realized_theo'].corr(df_vol['markout_5s_per_share'])
 
     print(f"  Edge vs Implied Theo → Markout correlation:  {implied_corr:.4f}")
     print(f"  Edge vs Realized Theo → Markout correlation: {realized_corr:.4f}")
@@ -786,11 +811,11 @@ def realized_vol_theo_analysis(df):
         high_realized = df_edge[df_edge['vol_edge_15m'] > 0.05]  # realized > implied by 5%
         low_realized = df_edge[df_edge['vol_edge_15m'] < -0.05]  # implied > realized by 5%
 
-        print(f"  High realized vol (vol_edge > 5%): {len(high_realized)} fills, avg markout=${high_realized['markout_5s'].mean():.4f}")
-        print(f"  Low realized vol (vol_edge < -5%): {len(low_realized)} fills, avg markout=${low_realized['markout_5s'].mean():.4f}")
+        print(f"  High realized vol (vol_edge > 5%): {len(high_realized)} fills, avg markout=${high_realized['markout_5s_per_share'].mean():.4f}")
+        print(f"  Low realized vol (vol_edge < -5%): {len(low_realized)} fills, avg markout=${low_realized['markout_5s_per_share'].mean():.4f}")
 
         if len(high_realized) >= MIN_SAMPLES_FOR_SIGNIFICANCE and len(low_realized) >= MIN_SAMPLES_FOR_SIGNIFICANCE:
-            comparison = compare_groups(high_realized['markout_5s'], low_realized['markout_5s'],
+            comparison = compare_groups(high_realized['markout_5s_per_share'], low_realized['markout_5s_per_share'],
                                        "High Real Vol", "Low Real Vol")
             print(f"  {comparison}")
 
@@ -809,10 +834,10 @@ def realized_vol_theo_analysis(df):
         bought_low_vol = df_edge[(df_edge['vol_edge_15m'] < -0.03) & (df_edge['dir_yes'] == 1)]
         sold_low_vol = df_edge[(df_edge['vol_edge_15m'] < -0.03) & (df_edge['dir_yes'] == -1)]
 
-        print(f"  Bought when realized > implied: {len(bought_high_vol)} fills, avg markout=${bought_high_vol['markout_5s'].mean():.4f}")
-        print(f"  Sold when realized > implied:   {len(sold_high_vol)} fills, avg markout=${sold_high_vol['markout_5s'].mean():.4f}")
-        print(f"  Bought when implied > realized: {len(bought_low_vol)} fills, avg markout=${bought_low_vol['markout_5s'].mean():.4f}")
-        print(f"  Sold when implied > realized:   {len(sold_low_vol)} fills, avg markout=${sold_low_vol['markout_5s'].mean():.4f}")
+        print(f"  Bought when realized > implied: {len(bought_high_vol)} fills, avg markout=${bought_high_vol['markout_5s_per_share'].mean():.4f}")
+        print(f"  Sold when realized > implied:   {len(sold_high_vol)} fills, avg markout=${sold_high_vol['markout_5s_per_share'].mean():.4f}")
+        print(f"  Bought when implied > realized: {len(bought_low_vol)} fills, avg markout=${bought_low_vol['markout_5s_per_share'].mean():.4f}")
+        print(f"  Sold when implied > realized:   {len(sold_low_vol)} fills, avg markout=${sold_low_vol['markout_5s_per_share'].mean():.4f}")
 
     # Performance by edge vs realized vol theo buckets
     print(f"\nMarkout by edge vs realized vol theo:")
@@ -825,7 +850,7 @@ def realized_vol_theo_analysis(df):
     for bucket in df_vol['realized_edge_bucket'].cat.categories:
         subset = df_vol[df_vol['realized_edge_bucket'] == bucket]
         if len(subset) > 0:
-            print(f"  {bucket:12s}: {len(subset):3d} fills, avg markout=${subset['markout_5s'].mean():.4f}")
+            print(f"  {bucket:12s}: {len(subset):3d} fills, avg markout=${subset['markout_5s_per_share'].mean():.4f}")
 
     print(f"\n  Expected: Large +ve edge vs realized theo → positive markouts")
     print(f"  If this pattern holds, realized vol theo has predictive power!")
@@ -893,7 +918,7 @@ def momentum_attribution_analysis(df):
     # Show worst fills
     if len(bad_fills) >= 5:
         print(f"\nWorst 5 fills (most adverse selection):")
-        worst = bad_fills.nsmallest(5, 'markout_5s')[['timestamp', 'edge_vs_fair', 'markout_5s', 'momentum', 'momentum_volatility']]
+        worst = bad_fills.nsmallest(5, 'markout_5s_per_share')[['timestamp', 'edge_vs_fair', 'markout_5s_per_share', 'momentum', 'momentum_volatility']]
         print(worst.to_string(index=False))
 
 def maker_vs_taker_analysis(df):
@@ -910,31 +935,35 @@ def maker_vs_taker_analysis(df):
     gtc = df[df['order_type'] == 'GTC']
     ioc = df[df['order_type'] == 'IOC']
 
-    print(f"Fill counts:")
-    print(f"  Maker (GTC): {len(gtc)} fills ({len(gtc)/len(df)*100:.1f}%)")
-    print(f"  Taker (IOC): {len(ioc)} fills ({len(ioc)/len(df)*100:.1f}%)")
+    gtc_shares = gtc['qty'].sum() if len(gtc) > 0 else 0
+    ioc_shares = ioc['qty'].sum() if len(ioc) > 0 else 0
 
-    print(f"\nMarkout performance (with significance tests):")
+    print(f"Fill counts:")
+    print(f"  Maker (GTC): {len(gtc)} fills, {gtc_shares:.0f} shares ({len(gtc)/len(df)*100:.1f}%)")
+    print(f"  Taker (IOC): {len(ioc)} fills, {ioc_shares:.0f} shares ({len(ioc)/len(df)*100:.1f}%)")
+
+    print(f"\nPer-Share Markout Performance:")
     for horizon in [1, 5, 15, 30, 60]:
-        col = f'markout_{horizon}s'
-        if col in df.columns:
-            gtc_avg = gtc[col].mean() if len(gtc) > 0 else 0
-            ioc_avg = ioc[col].mean() if len(ioc) > 0 else 0
-            comparison = compare_groups(gtc[col], ioc[col], "Maker", "Taker") if len(gtc) > 0 and len(ioc) > 0 else ""
-            print(f"  {horizon}s: Maker=${gtc_avg:.4f}, Taker=${ioc_avg:.4f}")
+        per_share_col = f'markout_{horizon}s_per_share'
+        if per_share_col in df.columns:
+            gtc_avg = gtc[per_share_col].mean() if len(gtc) > 0 else 0
+            ioc_avg = ioc[per_share_col].mean() if len(ioc) > 0 else 0
+            comparison = compare_groups(gtc[per_share_col], ioc[per_share_col], "Maker", "Taker") if len(gtc) > 0 and len(ioc) > 0 else ""
+            print(f"  {horizon}s: Maker={gtc_avg*100:+.2f}¢/share, Taker={ioc_avg*100:+.2f}¢/share")
             if comparison:
                 print(f"       {comparison}")
 
+    print(f"\nTotal PNL:")
+    for horizon in [1, 5, 15, 30, 60]:
+        col = f'markout_{horizon}s'
+        if col in df.columns:
+            gtc_total = gtc[col].sum() if len(gtc) > 0 else 0
+            ioc_total = ioc[col].sum() if len(ioc) > 0 else 0
+            print(f"  {horizon}s: Maker=${gtc_total:+.2f}, Taker=${ioc_total:+.2f}, Combined=${gtc_total+ioc_total:+.2f}")
+
     if len(gtc) > 0 and len(ioc) > 0:
-        gtc_total = gtc['markout_5s'].sum()
-        ioc_total = ioc['markout_5s'].sum()
-
-        print(f"\nTotal P&L (5s markout):")
-        print(f"  Maker (GTC): ${gtc_total:.2f}")
-        print(f"  Taker (IOC): ${ioc_total:.2f}")
-
-        gtc_hit = (gtc['markout_5s'] > 0).sum() / len(gtc) * 100 if len(gtc) > 0 else 0
-        ioc_hit = (ioc['markout_5s'] > 0).sum() / len(ioc) * 100 if len(ioc) > 0 else 0
+        gtc_hit = (gtc['markout_5s_per_share'] > 0).sum() / len(gtc) * 100
+        ioc_hit = (ioc['markout_5s_per_share'] > 0).sum() / len(ioc) * 100
 
         print(f"\nHit rate (5s markout > 0):")
         print(f"  Maker (GTC): {gtc_hit:.1f}%")
@@ -974,14 +1003,16 @@ def summary_and_diagnosis(df):
 
     issues = []
 
-    # Check overall profitability
-    avg_markout = df['markout_5s'].mean()
-    if avg_markout < -0.001:
-        issues.append("❌ LOSING MONEY: Negative avg markout")
-    elif avg_markout < 0.001:
-        issues.append("⚠️  BREAKEVEN: Near-zero avg markout")
+    # Check overall profitability (per-share and total)
+    avg_markout_per_share = df['markout_5s_per_share'].mean()
+    total_pnl = df['markout_5s'].sum()
+
+    if avg_markout_per_share < -0.001:
+        issues.append(f"❌ LOSING MONEY: {avg_markout_per_share*100:.2f}¢/share avg, ${total_pnl:.2f} total PNL")
+    elif avg_markout_per_share < 0.001:
+        issues.append(f"⚠️  BREAKEVEN: {avg_markout_per_share*100:.2f}¢/share avg, ${total_pnl:.2f} total PNL")
     else:
-        issues.append("✅ PROFITABLE: Positive avg markout")
+        issues.append(f"✅ PROFITABLE: +{avg_markout_per_share*100:.2f}¢/share avg, ${total_pnl:+.2f} total PNL")
 
     # Check delta
     if 'delta' in df.columns and df['delta'].mean() < 0.00001:
@@ -989,7 +1020,7 @@ def summary_and_diagnosis(df):
 
     # Check momentum correlation
     if 'momentum' in df.columns:
-        mom_corr = df['momentum'].corr(df['markout_5s'])
+        mom_corr = df['momentum'].corr(df['markout_5s_per_share'])
         if mom_corr < 0:
             issues.append("❌ Negative momentum correlation - strategy backwards?")
         elif mom_corr < 0.05:
@@ -997,14 +1028,14 @@ def summary_and_diagnosis(df):
 
     # Check theo value
     if 'edge_vs_theo' in df.columns:
-        theo_corr = df['edge_vs_theo'].corr(df['markout_5s'])
+        theo_corr = df['edge_vs_theo'].corr(df['markout_5s_per_share'])
         if theo_corr < 0:
             issues.append("❌ Theo has negative correlation - model is wrong")
         elif theo_corr > 0.15:
             issues.append("✅ Theo has value - model is predictive")
 
     # Check adverse selection
-    hit_rate = (df['markout_5s'] > 0).sum() / len(df) * 100
+    hit_rate = (df['markout_5s_per_share'] > 0).sum() / len(df) * 100
     if hit_rate < 45:
         issues.append("❌ Low hit rate - getting adverse selected")
 
@@ -1013,11 +1044,11 @@ def summary_and_diagnosis(df):
         print(f"  {issue}")
 
     print(f"\nRecommendations:")
-    if avg_markout < 0:
+    if avg_markout_per_share < 0:
         print("  1. STOP TRADING - You're losing money!")
         print("  2. Check if delta is working (should be 0.0001-0.01)")
         print("  3. Review momentum vs theo correlations")
-        if mom_corr < 0.05:
+        if 'momentum' in df.columns and df['momentum'].corr(df['markout_5s_per_share']) < 0.05:
             print("  4. Consider disabling momentum (USE_BINANCE_MOMENTUM=False)")
         if df['delta'].mean() < 0.00001:
             print("  5. CRITICAL: Delta is broken - check why binary_delta is zero")
