@@ -165,10 +165,20 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
             best_ask = asks.peekitem(0)[0]
             market_mid = 0.5 * (best_bid + best_ask)
 
-    # Calculate fair_yes used for quoting (momentum-adjusted)
+    # Calculate fair_yes used for quoting (must match trading.py exactly!)
+    # Start with market mid
     fair_yes = market_mid if market_mid else 0.0
 
-    # Reprice option with momentum (includes gamma, matching trading.py)
+    # 1) Add book imbalance adjustment (if enabled)
+    # Book imbalance is already calculated and stored in global_state
+    imbalance_adj = 0.0
+    if book_imbalance != 0.0:
+        # Match trading.py: imbalance_adj = imbalance * MAX_IMBALANCE_ADJUSTMENT
+        MAX_IMBALANCE_ADJUSTMENT = 0.045  # Must match trading.py
+        imbalance_adj = book_imbalance * MAX_IMBALANCE_ADJUSTMENT
+        fair_yes += imbalance_adj
+
+    # 2) Add momentum adjustment (reprice option with gamma)
     if price_source == "COINBASE":
         S_current = global_state.coinbase_mid_price
     elif price_source == "RTDS":
@@ -202,6 +212,11 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
             predicted_option_move = max(-0.03, min(0.03, predicted_option_move))
 
             fair_yes = fair_yes + predicted_option_move
+
+    # 3) Add z-score skew adjustment
+    # Z-skew is already calculated and stored in global_state
+    if zscore != 0.0:
+        fair_yes += z_skew
 
     # Calculate edge metrics
     # For buys (dir_yes=+1): positive edge = bought below value

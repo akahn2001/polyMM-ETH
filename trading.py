@@ -317,13 +317,13 @@ IOC_COOLDOWN = 5.0                  # Seconds between IOC orders (prevents spam 
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
 BASE_QUOTE_SPREAD = 0.050 # .05 base quote, 30 max position, 5 base size was working well
-MAX_POSITION = 70
+MAX_POSITION = 40
 BASE_SIZE = 10.0 # Base size/max pos was 5 / 30
 #INV_SKEW_PER_SHARE = 0.00050
 
 SKEW_K = .60          # 0.3–1.0, start ~0.6
 SKEW_CAP = 0.04       # max skew in price points (5c)
-
+alex = "gay"
 MIN_PRICE = 0.01
 MAX_PRICE = 0.99
 PRICE_MOVE_TOL = 0.0015          # don't cancel/replace if existing quote is within 0.5c of target
@@ -349,18 +349,18 @@ MAX_OPTION_SPREAD_MULT = 1.0      # was 2.0, decreasing to 1.0 to turn this feat
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = .035   # 1/2/26: was .025, changing to .035
+MAX_IMBALANCE_ADJUSTMENT = 0   # 1/2/26: was .025, changing to .035
 
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .30    # 1/2/26: was .35, changing to .30
 
 # Coinbase-RTDS z-score threshold (predictive edge detection when using RTDS)
-COINBASE_RTDS_ZSCORE_THRESHOLD = 0.70  # Skip vulnerable side when |z| > 0.70
+COINBASE_RTDS_ZSCORE_THRESHOLD = 0.60  # Skip vulnerable side when |z| > 0.70
 Z_SCORE_COMBINED_THRESHOLD = 0.40      # Combined threshold (half of main)
 Z_SKEW_COMBINED_THRESHOLD = 0.025      # 2.5¢ predicted option move threshold for combined rule
 
 # Z-score skew (continuous adjustment based on predicted RTDS movement)
-MAX_Z_SCORE_SKEW = 0.035 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
+MAX_Z_SCORE_SKEW = 0 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
 
 VERBOSE = False
 
