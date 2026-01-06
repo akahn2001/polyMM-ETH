@@ -349,7 +349,7 @@ MAX_OPTION_SPREAD_MULT = 1.0      # was 2.0, decreasing to 1.0 to turn this feat
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = .01   # 1/2/26: was .025, changing to .035
+MAX_IMBALANCE_ADJUSTMENT = .02   # 1/2/26: was .025, changing to .035
 
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .30    # 1/2/26: was .35, changing to .30
@@ -360,7 +360,7 @@ Z_SCORE_COMBINED_THRESHOLD = 0.30      # Combined threshold (half of main)
 Z_SKEW_COMBINED_THRESHOLD = 0.025      # 2.5¢ predicted option move threshold for combined rule
 
 # Z-score skew (continuous adjustment based on predicted RTDS movement)
-MAX_Z_SCORE_SKEW = .01 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
+MAX_Z_SCORE_SKEW = .02 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
 
 # Cap on total signal adjustments (book imbalance + z-score skew combined)
 # Prevents crossing spread when both signals fire strongly in same direction
