@@ -362,6 +362,10 @@ Z_SKEW_COMBINED_THRESHOLD = 0.025      # 2.5¢ predicted option move threshold f
 # Z-score skew (continuous adjustment based on predicted RTDS movement)
 MAX_Z_SCORE_SKEW = 0 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
 
+# Cap on total signal adjustments (book imbalance + z-score skew combined)
+# Prevents crossing spread when both signals fire strongly in same direction
+MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.025  # Cap combined adjustments at ±2.5¢ from mid
+
 VERBOSE = False
 
 
@@ -977,12 +981,13 @@ async def _perform_trade_locked(market_id: str):
 
     # Book imbalance adjustment: lean quotes in direction of order flow
     book_imbalance = 0.0
+    imbalance_adj = 0.0  # Track for total signal adjustment cap
     if USE_BOOK_IMBALANCE:
         imbalance, bid_depth, ask_depth = compute_book_imbalance(market_id)
         book_imbalance = imbalance
         # More bids than asks → price likely rising → nudge fair up
         imbalance_adj = imbalance * MAX_IMBALANCE_ADJUSTMENT
-        fair_yes += imbalance_adj
+        # Note: We apply this AFTER z_skew is calculated to cap total adjustment
         if VERBOSE and abs(imbalance) > 0.3:
             print(f"[MM] Book imbalance: {imbalance:.2f} (bid={bid_depth:.0f}, ask={ask_depth:.0f}), adj={imbalance_adj:.4f}")
 
@@ -1183,13 +1188,38 @@ async def _perform_trade_locked(market_id: str):
                     # Cap the skew
                     z_skew = max(-MAX_Z_SCORE_SKEW, min(MAX_Z_SCORE_SKEW, z_skew))
 
-    # Apply z-score skew to fair value
-    fair_adj_yes += z_skew
+    # Apply signal adjustments (book imbalance + z-score skew) with total cap
+    # This prevents crossing the spread when both signals fire strongly in same direction
+    total_signal_adj = imbalance_adj + z_skew
+
+    # Track original values for diagnostics
+    original_imbalance_adj = imbalance_adj
+    original_z_skew = z_skew
+
+    # Cap total adjustment if exceeds limit
+    if abs(total_signal_adj) > MAX_TOTAL_SIGNAL_ADJUSTMENT:
+        # Scale both signals proportionally to stay within cap
+        scale_factor = MAX_TOTAL_SIGNAL_ADJUSTMENT / abs(total_signal_adj)
+        imbalance_adj *= scale_factor
+        z_skew *= scale_factor
+        total_signal_adj = imbalance_adj + z_skew
+
+        if VERBOSE:
+            print(f"[MM] Signal cap applied: total={original_imbalance_adj + original_z_skew:.4f} -> {total_signal_adj:.4f} "
+                  f"(imb={original_imbalance_adj:.4f}->{imbalance_adj:.4f}, z={original_z_skew:.4f}->{z_skew:.4f})")
+
+    # Apply combined signal adjustment
+    fair_adj_yes += total_signal_adj
 
     # Store z-score skew for display and markout tracking
     if not hasattr(global_state, 'z_skew_by_market'):
         global_state.z_skew_by_market = {}
     global_state.z_skew_by_market[market_id] = z_skew
+
+    # Store imbalance adjustment for markout tracking
+    if not hasattr(global_state, 'imbalance_adj_by_market'):
+        global_state.imbalance_adj_by_market = {}
+    global_state.imbalance_adj_by_market[market_id] = imbalance_adj
 
     half_spread = quote_spread / 2.0
     raw_bid_yes = fair_adj_yes - half_spread

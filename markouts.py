@@ -169,14 +169,14 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
     # Start with market mid
     fair_yes = market_mid if market_mid else 0.0
 
-    # 1) Add book imbalance adjustment (if enabled)
+    # 1) Calculate book imbalance adjustment (if enabled)
     # Book imbalance is already calculated and stored in global_state
     imbalance_adj = 0.0
     if book_imbalance != 0.0:
         # Match trading.py: imbalance_adj = imbalance * MAX_IMBALANCE_ADJUSTMENT
         MAX_IMBALANCE_ADJUSTMENT = 0.045  # Must match trading.py
         imbalance_adj = book_imbalance * MAX_IMBALANCE_ADJUSTMENT
-        fair_yes += imbalance_adj
+        # Note: We apply this AFTER z_skew is calculated to cap total adjustment
 
     # 2) Add momentum adjustment (reprice option with gamma)
     if price_source == "COINBASE":
@@ -213,10 +213,21 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
 
             fair_yes = fair_yes + predicted_option_move
 
-    # 3) Add z-score skew adjustment
-    # Z-skew is already calculated and stored in global_state
-    if zscore != 0.0:
-        fair_yes += z_skew
+    # 3) Apply signal adjustments (book imbalance + z-score skew) with total cap
+    # This must match trading.py to ensure fair_yes consistency
+    MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.025  # Must match trading.py
+    total_signal_adj = imbalance_adj + z_skew
+
+    # Cap total adjustment if exceeds limit
+    if abs(total_signal_adj) > MAX_TOTAL_SIGNAL_ADJUSTMENT:
+        # Scale both signals proportionally to stay within cap
+        scale_factor = MAX_TOTAL_SIGNAL_ADJUSTMENT / abs(total_signal_adj)
+        imbalance_adj *= scale_factor
+        z_skew *= scale_factor
+        total_signal_adj = imbalance_adj + z_skew
+
+    # Apply combined signal adjustment
+    fair_yes += total_signal_adj
 
     # Calculate edge metrics
     # For buys (dir_yes=+1): positive edge = bought below value
@@ -283,6 +294,7 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
         # Z-score predictor
         "zscore": zscore,  # Coinbase-RTDS spread z-score (+ means RTDS will rise, - means RTDS will fall)
         "z_skew": z_skew,  # Applied fair value skew from z-score (in cents)
+        "imbalance_adj": imbalance_adj,  # Applied fair value adjustment from book imbalance (in cents, capped)
     })
 
 def _pct(vals, p):

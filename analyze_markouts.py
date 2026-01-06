@@ -248,38 +248,87 @@ def momentum_analysis(df):
         print("  ❌ Momentum fills are WORSE - strategy may be broken")
 
 def theo_value_test(df):
-    """Test if theo has predictive value."""
+    """Test if Black-Scholes theo is more valuable than market mid as reference price."""
     print("\n" + "=" * 80)
-    print("THEO VALUE TEST")
+    print("THEO VALUE TEST: Black-Scholes Theo vs Market Mid")
     print("=" * 80)
 
-    if 'edge_vs_theo' not in df.columns:
-        print("  ⚠️  edge_vs_theo not in data - run with updated markouts code")
+    if 'theo' not in df.columns or 'market_mid' not in df.columns:
+        print("  ⚠️  theo or market_mid not in data - run with updated markouts code")
         print("     Delete detailed_fills.csv and restart bot to get this data")
         return
 
-    # Edge vs theo correlation with markouts
-    edge_corr = df['edge_vs_theo'].corr(df['markout_5s_per_share'])
-    print(f"Edge vs Theo → Markout correlation: {edge_corr:.3f}")
-    if edge_corr > 0.2:
-        print("  ✅ Strong positive correlation - theo has value!")
-    elif edge_corr > 0.05:
-        print("  ⚠️  Weak positive correlation - theo has some value")
-    else:
-        print("  ❌ No correlation - theo is NOT predictive!")
+    # Calculate edge vs theo (Black-Scholes)
+    # For buys: positive = bought below theo value
+    # For sells: positive = sold above theo value
+    df['edge_vs_theo'] = df.apply(
+        lambda row: (row['theo'] - row['fill_yes']) if row['dir_yes'] > 0 else (row['fill_yes'] - row['theo']),
+        axis=1
+    )
 
-    # Performance by edge buckets
-    print(f"\nMarkout performance by edge vs theo:")
+    # Calculate edge vs market mid
+    # For buys: positive = bought below market mid
+    # For sells: positive = sold above market mid
+    df['edge_vs_market_mid'] = df.apply(
+        lambda row: (row['market_mid'] - row['fill_yes']) if row['dir_yes'] > 0 else (row['fill_yes'] - row['market_mid']),
+        axis=1
+    )
+
+    # Test correlation with markouts
+    theo_corr = df['edge_vs_theo'].corr(df['markout_5s_per_share'])
+    mid_corr = df['edge_vs_market_mid'].corr(df['markout_5s_per_share'])
+
+    print(f"Which reference price is more predictive of markouts?")
+    print(f"  Edge vs Theo (BS model)   → Markout correlation: {theo_corr:.3f}")
+    print(f"  Edge vs Market Mid        → Markout correlation: {mid_corr:.3f}")
+
+    if theo_corr > mid_corr + 0.05:
+        print(f"  ✅ Black-Scholes theo is MORE valuable than market mid!")
+    elif mid_corr > theo_corr + 0.05:
+        print(f"  ⚠️  Market mid is MORE valuable than Black-Scholes theo")
+    else:
+        print(f"  ≈  Similar predictive value")
+
+    # Compare average markouts for trades following theo vs market signals
+    print(f"\nWhen theo disagrees with market (|theo - market_mid| > 2¢):")
+
+    # Theo says cheap, market says rich → bought
+    theo_cheap_bought = df[(df['theo'] - df['market_mid'] > 0.02) & (df['dir_yes'] == 1)]
+    if len(theo_cheap_bought) > 0:
+        print(f"  Bought when theo>mid by >2¢: {len(theo_cheap_bought):3d} fills, "
+              f"avg markout=${theo_cheap_bought['markout_5s_per_share'].mean():.4f}")
+
+    # Theo says rich, market says cheap → sold
+    theo_rich_sold = df[(df['market_mid'] - df['theo'] > 0.02) & (df['dir_yes'] == -1)]
+    if len(theo_rich_sold) > 0:
+        print(f"  Sold when mid>theo by >2¢:   {len(theo_rich_sold):3d} fills, "
+              f"avg markout=${theo_rich_sold['markout_5s_per_share'].mean():.4f}")
+
+    # Performance by edge vs theo buckets
+    print(f"\nMarkout performance by edge vs Black-Scholes theo:")
     df['edge_bucket'] = pd.cut(df['edge_vs_theo'], bins=[-np.inf, -0.02, -0.005, 0.005, 0.02, np.inf],
                                  labels=['Large -ve', 'Small -ve', 'Neutral', 'Small +ve', 'Large +ve'])
 
     for bucket in df['edge_bucket'].cat.categories:
         subset = df[df['edge_bucket'] == bucket]
         if len(subset) > 0:
-            print(f"  {bucket:12s}: {len(subset):3d} fills, avg markout=${subset['markout_5s_per_share'].mean():.4f}")
+            avg_markout = subset['markout_5s_per_share'].mean()
+            avg_theo_edge = subset['edge_vs_theo'].mean()
+            print(f"  {bucket:12s}: {len(subset):3d} fills, "
+                  f"avg edge=${avg_theo_edge:+.4f}, "
+                  f"avg markout=${avg_markout:.4f}")
 
     print(f"\n  Expected: Large +ve edge → positive markouts")
     print(f"  Expected: Large -ve edge → negative markouts")
+
+    # Summary stats
+    avg_theo_vs_mid = (df['theo'] - df['market_mid']).mean()
+    print(f"\nAverage theo - market_mid: ${avg_theo_vs_mid:+.4f}")
+    if abs(avg_theo_vs_mid) > 0.01:
+        if avg_theo_vs_mid > 0:
+            print(f"  → Black-Scholes model consistently prices higher than market")
+        else:
+            print(f"  → Black-Scholes model consistently prices lower than market")
 
 def model_vs_market_test(df):
     """Test if model disagreement with market is valuable."""
