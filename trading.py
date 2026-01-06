@@ -349,7 +349,7 @@ MAX_OPTION_SPREAD_MULT = 1.0      # was 2.0, decreasing to 1.0 to turn this feat
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = .02   # 1/2/26: was .025, changing to .035
+MAX_IMBALANCE_ADJUSTMENT = .025   # 1/2/26: was .025, changing to .035
 
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .30    # 1/2/26: was .35, changing to .30
@@ -360,7 +360,7 @@ Z_SCORE_COMBINED_THRESHOLD = 0.30      # Combined threshold (half of main)
 Z_SKEW_COMBINED_THRESHOLD = 0.025      # 2.5¢ predicted option move threshold for combined rule
 
 # Z-score skew (continuous adjustment based on predicted RTDS movement)
-MAX_Z_SCORE_SKEW = .02 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
+MAX_Z_SCORE_SKEW = .025 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
 
 # Cap on total signal adjustments (book imbalance + z-score skew combined)
 # Prevents crossing spread when both signals fire strongly in same direction
@@ -906,10 +906,10 @@ async def _perform_trade_locked(market_id: str):
     best_ask_yes = info["best_ask"]
     book_mid = .5*(best_bid_yes+best_ask_yes)
 
-    # Blend theo (75%) with book mid (25%) for quoting
-    # Theo reacts to spot price (Coinbase or blend), book mid anchors to market reality
+    # Use book mid as base for quoting (market's current forward-looking price)
+    # We'll add z_skew_residual to avoid double-counting when market has already moved
     theo = info["fair"]  # global_state.fair_value[market_id]
-    fair_yes = 0.30 * theo + 0.70 * book_mid
+    fair_yes = book_mid
 
     # Add momentum adjustment if enabled (uses Coinbase if USE_COINBASE_PRICE=True, else Binance)
     if not USE_BINANCE_MOMENTUM:
@@ -1148,7 +1148,9 @@ async def _perform_trade_locked(market_id: str):
     fair_adj_yes = fair_yes + skew
 
     # Z-score skew: Adjust fair value based on predicted RTDS movement
+    # We calculate the RESIDUAL skew (what market hasn't already priced)
     z_skew = 0.0
+    z_skew_residual = 0.0
     z_score = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
     if z_score != 0.0:
         # Use cached spread std (calculated in coinbase_price_stream when z-score updates)
@@ -1188,33 +1190,48 @@ async def _perform_trade_locked(market_id: str):
                     # Cap the skew
                     z_skew = max(-MAX_Z_SCORE_SKEW, min(MAX_Z_SCORE_SKEW, z_skew))
 
-    # Apply signal adjustments (book imbalance + z-score skew) with total cap
+                    # Calculate residual: subtract what market has already priced
+                    # market_implied_move = how much market is pricing above/below theo
+                    # z_skew_residual = predicted move minus what's already priced
+                    market_implied_move = book_mid - theo
+                    z_skew_residual = z_skew - market_implied_move
+
+                    if VERBOSE and abs(market_implied_move) > 0.01:
+                        print(f"[MM] Z-skew decomposition: full={z_skew:.4f}, market_priced={market_implied_move:.4f}, residual={z_skew_residual:.4f}")
+
+    # Apply signal adjustments (book imbalance + z-score residual skew) with total cap
     # This prevents crossing the spread when both signals fire strongly in same direction
-    total_signal_adj = imbalance_adj + z_skew
+    # Use z_skew_residual to avoid double-counting what market has already priced
+    total_signal_adj = imbalance_adj + z_skew_residual
 
     # Track original values for diagnostics
     original_imbalance_adj = imbalance_adj
-    original_z_skew = z_skew
+    original_z_skew_residual = z_skew_residual
 
     # Cap total adjustment if exceeds limit
     if abs(total_signal_adj) > MAX_TOTAL_SIGNAL_ADJUSTMENT:
         # Scale both signals proportionally to stay within cap
         scale_factor = MAX_TOTAL_SIGNAL_ADJUSTMENT / abs(total_signal_adj)
         imbalance_adj *= scale_factor
-        z_skew *= scale_factor
-        total_signal_adj = imbalance_adj + z_skew
+        z_skew_residual *= scale_factor
+        total_signal_adj = imbalance_adj + z_skew_residual
 
         if VERBOSE:
-            print(f"[MM] Signal cap applied: total={original_imbalance_adj + original_z_skew:.4f} -> {total_signal_adj:.4f} "
-                  f"(imb={original_imbalance_adj:.4f}->{imbalance_adj:.4f}, z={original_z_skew:.4f}->{z_skew:.4f})")
+            print(f"[MM] Signal cap applied: total={original_imbalance_adj + original_z_skew_residual:.4f} -> {total_signal_adj:.4f} "
+                  f"(imb={original_imbalance_adj:.4f}->{imbalance_adj:.4f}, z_res={original_z_skew_residual:.4f}->{z_skew_residual:.4f})")
 
     # Apply combined signal adjustment
     fair_adj_yes += total_signal_adj
 
     # Store z-score skew for display and markout tracking
+    # Store both full z_skew and z_skew_residual for diagnostics
     if not hasattr(global_state, 'z_skew_by_market'):
         global_state.z_skew_by_market = {}
     global_state.z_skew_by_market[market_id] = z_skew
+
+    if not hasattr(global_state, 'z_skew_residual_by_market'):
+        global_state.z_skew_residual_by_market = {}
+    global_state.z_skew_residual_by_market[market_id] = z_skew_residual
 
     # Store imbalance adjustment for markout tracking
     if not hasattr(global_state, 'imbalance_adj_by_market'):

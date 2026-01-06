@@ -213,18 +213,23 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
 
             fair_yes = fair_yes + predicted_option_move
 
-    # 3) Apply signal adjustments (book imbalance + z-score skew) with total cap
+    # 3) Apply signal adjustments (book imbalance + z-score residual) with total cap
     # This must match trading.py to ensure fair_yes consistency
+    # Calculate z_skew_residual to avoid double-counting what market has already priced
     MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.025  # Must match trading.py
-    total_signal_adj = imbalance_adj + z_skew
+
+    market_implied_move = market_mid - theo if market_mid and theo else 0.0
+    z_skew_residual = z_skew - market_implied_move
+
+    total_signal_adj = imbalance_adj + z_skew_residual
 
     # Cap total adjustment if exceeds limit
     if abs(total_signal_adj) > MAX_TOTAL_SIGNAL_ADJUSTMENT:
         # Scale both signals proportionally to stay within cap
         scale_factor = MAX_TOTAL_SIGNAL_ADJUSTMENT / abs(total_signal_adj)
         imbalance_adj *= scale_factor
-        z_skew *= scale_factor
-        total_signal_adj = imbalance_adj + z_skew
+        z_skew_residual *= scale_factor
+        total_signal_adj = imbalance_adj + z_skew_residual
 
     # Apply combined signal adjustment
     fair_yes += total_signal_adj
@@ -293,7 +298,9 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
         "realized_vol_theo": realized_vol_theo,  # theo priced with realized vol instead of implied
         # Z-score predictor
         "zscore": zscore,  # Coinbase-RTDS spread z-score (+ means RTDS will rise, - means RTDS will fall)
-        "z_skew": z_skew,  # Applied fair value skew from z-score (in cents)
+        "z_skew": z_skew,  # Full predicted option value change from z-score (before residual adjustment)
+        "market_implied_move": market_implied_move,  # What market has already priced (book_mid - theo)
+        "z_skew_residual": z_skew_residual,  # Applied z_skew after subtracting what market priced
         "imbalance_adj": imbalance_adj,  # Applied fair value adjustment from book imbalance (in cents, capped)
     })
 

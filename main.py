@@ -111,20 +111,23 @@ def update_periodically(client):
 
                 # Get signal adjustments for display (in cents)
                 z_skew_cents = 0.0
+                z_skew_residual_cents = 0.0
                 if hasattr(global_state, 'z_skew_by_market'):
                     z_skew_cents = global_state.z_skew_by_market.get(market_id, 0.0) * 100
+                if hasattr(global_state, 'z_skew_residual_by_market'):
+                    z_skew_residual_cents = global_state.z_skew_residual_by_market.get(market_id, 0.0) * 100
 
                 imbalance_adj_cents = 0.0
                 if hasattr(global_state, 'imbalance_adj_by_market'):
                     imbalance_adj_cents = global_state.imbalance_adj_by_market.get(market_id, 0.0) * 100
 
-                total_signal_cents = z_skew_cents + imbalance_adj_cents
+                total_signal_cents = z_skew_residual_cents + imbalance_adj_cents
 
                 # Only print if we have valid prices
                 if price_source == "COINBASE":
                     if exchange_spot is not None and main_theo is not None and fair_vol is not None:
                         # Show Coinbase, bias correction, and adjusted price
-                        print(f"RTDS: {rtds_spot:.2f}  CB: {exchange_spot:.2f}  BIAS: {coinbase_bias:+.2f}  CB_ADJ: {coinbase_adjusted:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}  SPREAD: {spread_mult:.2f}x  |  SKEWS: Z={z_skew_cents:+.2f}¢ IMB={imbalance_adj_cents:+.2f}¢ TOT={total_signal_cents:+.2f}¢")
+                        print(f"RTDS: {rtds_spot:.2f}  CB: {exchange_spot:.2f}  BIAS: {coinbase_bias:+.2f}  CB_ADJ: {coinbase_adjusted:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}  SPREAD: {spread_mult:.2f}x  |  SKEWS: Z={z_skew_cents:+.2f}¢(res={z_skew_residual_cents:+.2f}¢) IMB={imbalance_adj_cents:+.2f}¢ TOT={total_signal_cents:+.2f}¢")
                     elif exchange_spot is None and rtds_spot is not None:
                         # Waiting for Coinbase price
                         print(f"[WAITING] RTDS connected ({rtds_spot:.2f}), waiting for Coinbase price...")
@@ -136,7 +139,7 @@ def update_periodically(client):
                         # Show pure RTDS with Coinbase predictor data
                         z_score = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
                         cb_price = coinbase_spot if coinbase_spot is not None else 0.0
-                        print(f"RTDS: {rtds_spot:.2f}  CB: {cb_price:.2f}  Z: {z_score:+.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}  SPREAD: {spread_mult:.2f}x  |  SKEWS: Z={z_skew_cents:+.2f}¢ IMB={imbalance_adj_cents:+.2f}¢ TOT={total_signal_cents:+.2f}¢")
+                        print(f"RTDS: {rtds_spot:.2f}  CB: {cb_price:.2f}  Z: {z_score:+.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}  SPREAD: {spread_mult:.2f}x  |  SKEWS: Z={z_skew_cents:+.2f}¢(res={z_skew_residual_cents:+.2f}¢) IMB={imbalance_adj_cents:+.2f}¢ TOT={total_signal_cents:+.2f}¢")
                     elif rtds_spot is None:
                         # Waiting for RTDS
                         print(f"[WAITING] Waiting for RTDS connection...")
@@ -147,7 +150,7 @@ def update_periodically(client):
                         print(f"[WAITING] RTDS: {rtds_spot:.2f}  CB: {cb_price:.2f}  Z: {z_score:+.2f}  |  Calibrating vol/theo...")
                 else:  # BLEND
                     if exchange_spot is not None and blended_spot is not None and main_theo is not None and fair_vol is not None:
-                        print(f"RTDS: {rtds_spot:.2f}  BINANCE: {exchange_spot:.2f}  BLEND: {blended_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}  SPREAD: {spread_mult:.2f}x  |  SKEWS: Z={z_skew_cents:+.2f}¢ IMB={imbalance_adj_cents:+.2f}¢ TOT={total_signal_cents:+.2f}¢")
+                        print(f"RTDS: {rtds_spot:.2f}  BINANCE: {exchange_spot:.2f}  BLEND: {blended_spot:.2f}  |  THEO: {main_theo:.4f}  VOL: {fair_vol:.3f}  SPREAD: {spread_mult:.2f}x  |  SKEWS: Z={z_skew_cents:+.2f}¢(res={z_skew_residual_cents:+.2f}¢) IMB={imbalance_adj_cents:+.2f}¢ TOT={total_signal_cents:+.2f}¢")
                     elif exchange_spot is None and rtds_spot is not None:
                         # Waiting for Binance price
                         print(f"[WAITING] RTDS connected ({rtds_spot:.2f}), waiting for Binance price...")
