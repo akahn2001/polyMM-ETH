@@ -317,7 +317,7 @@ IOC_COOLDOWN = 5.0                  # Seconds between IOC orders (prevents spam 
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
 BASE_QUOTE_SPREAD = 0.050 # .05 base quote, 30 max position, 5 base size was working well
-MAX_POSITION = 40
+MAX_POSITION = 50
 BASE_SIZE = 10.0 # Base size/max pos was 5 / 30
 #INV_SKEW_PER_SHARE = 0.00050
 
@@ -333,7 +333,7 @@ MIN_TICKS_REDUCE = -1   # ticks from touch when reducing position (want to get f
 MIN_EDGE_TO_QUOTE = 0.02  # minimum edge (in price points) required to quote a side
 
 MIN_ORDER_INTERVAL = .20  # seconds → max 5 orders/sec per market+side, # changed this back to 1
-POST_FILL_COOLDOWN = 1.0  # seconds to pause quoting on a side after getting filled (GTC only)
+POST_FILL_COOLDOWN = .33  # seconds to pause quoting on a side after getting filled (GTC only)
 
 # Binance momentum adjustment
 USE_BINANCE_MOMENTUM = False  # Toggle to use Binance momentum for predictive quoting
