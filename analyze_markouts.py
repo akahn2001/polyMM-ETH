@@ -801,6 +801,129 @@ def z_skew_analysis(df):
                 print(f"  ❌ Weak correlation - check z_skew calculation")
 
 
+def z_skew_residual_analysis(df):
+    """Analyze z_skew residual approach - does subtracting market_implied_move improve edge?"""
+    print("\n" + "=" * 80)
+    print("Z-SKEW RESIDUAL ANALYSIS")
+    print("=" * 80)
+
+    required_cols = ['z_skew', 'market_implied_move', 'z_skew_residual']
+    if not all(col in df.columns for col in required_cols):
+        print("  ⚠️  Residual columns not in data - run with updated code")
+        print("     Delete detailed_fills.csv and restart bot to get this data")
+        return
+
+    print(f"Analyzing {len(df)} fills with z_skew residual data\n")
+
+    # 1. How much does market typically price in?
+    avg_z_skew = df['z_skew'].abs().mean()
+    avg_market_implied = df['market_implied_move'].abs().mean()
+    avg_residual = df['z_skew_residual'].abs().mean()
+
+    print(f"Signal decomposition (absolute values):")
+    print(f"  Avg |z_skew| (full prediction):     {avg_z_skew*100:.2f}¢")
+    print(f"  Avg |market_implied| (already priced): {avg_market_implied*100:.2f}¢")
+    print(f"  Avg |residual| (what we apply):     {avg_residual*100:.2f}¢")
+
+    pct_applied = (avg_residual / avg_z_skew * 100) if avg_z_skew > 0 else 0
+    print(f"  → We apply {pct_applied:.1f}% of the full z_skew on average\n")
+
+    # 2. Agreement vs disagreement with market
+    # Same sign = market moved in predicted direction but not fully
+    # Opposite sign = market overshot or moved wrong direction
+    df['z_market_agree'] = (df['z_skew'] * df['market_implied_move']) > 0
+    df['z_residual_agree'] = (df['z_skew'] * df['z_skew_residual']) > 0
+
+    agree = df[df['z_market_agree'] == True]
+    disagree = df[df['z_market_agree'] == False]
+
+    print(f"Market vs Z-score agreement:")
+    print(f"  Agree (same direction):   {len(agree):3d} fills ({len(agree)/len(df)*100:.1f}%)")
+    if len(agree) > 0:
+        print(f"    → Avg |market_implied|: {agree['market_implied_move'].abs().mean()*100:.2f}¢")
+        print(f"    → Avg markout: ${agree['markout_5s_per_share'].mean():.4f}")
+
+    print(f"  Disagree (opposite dirs): {len(disagree):3d} fills ({len(disagree)/len(df)*100:.1f}%)")
+    if len(disagree) > 0:
+        print(f"    → Avg |market_implied|: {disagree['market_implied_move'].abs().mean()*100:.2f}¢")
+        print(f"    → Avg markout: ${disagree['markout_5s_per_share'].mean():.4f}")
+
+    # 3. When residual flips sign (market overshot), are we right to fade it?
+    same_sign = df[df['z_residual_agree'] == True]
+    flipped_sign = df[df['z_residual_agree'] == False]
+
+    print(f"\nResidual sign flips:")
+    print(f"  Residual same sign as z_skew:     {len(same_sign):3d} fills ({len(same_sign)/len(df)*100:.1f}%)")
+    if len(same_sign) > 0:
+        print(f"    → Avg residual: {same_sign['z_skew_residual'].mean()*100:+.2f}¢")
+        print(f"    → Avg markout: ${same_sign['markout_5s_per_share'].mean():.4f}")
+
+    print(f"  Residual flipped sign (fading mkt): {len(flipped_sign):3d} fills ({len(flipped_sign)/len(df)*100:.1f}%)")
+    if len(flipped_sign) > 0:
+        print(f"    → Avg residual: {flipped_sign['z_skew_residual'].mean()*100:+.2f}¢")
+        print(f"    → Avg markout: ${flipped_sign['markout_5s_per_share'].mean():.4f}")
+        if flipped_sign['markout_5s_per_share'].mean() > 0:
+            print(f"    ✅ Profitable to fade market when it overshoots!")
+        else:
+            print(f"    ❌ Losing money when fading market - residual approach may be wrong")
+
+    # 4. Predictive power comparison - what matters is following the signal
+    # Full z_skew: when signal is positive, did buying work? when negative, did selling work?
+    full_bullish_buys = df[(df['z_skew'] > 0) & (df['dir_yes'] == 1)]
+    full_bearish_sells = df[(df['z_skew'] < 0) & (df['dir_yes'] == -1)]
+    full_signal_following = pd.concat([full_bullish_buys, full_bearish_sells])
+
+    # Residual z_skew: same logic
+    res_bullish_buys = df[(df['z_skew_residual'] > 0) & (df['dir_yes'] == 1)]
+    res_bearish_sells = df[(df['z_skew_residual'] < 0) & (df['dir_yes'] == -1)]
+    res_signal_following = pd.concat([res_bullish_buys, res_bearish_sells])
+
+    print(f"\nPredictive power (avg markout when FOLLOWING signal):")
+    print(f"\nFull z_skew approach:")
+    if len(full_signal_following) > 0:
+        full_avg = full_signal_following['markout_5s_per_share'].mean()
+        print(f"  Bought when z_skew>0: {len(full_bullish_buys):3d} fills, avg markout=${full_bullish_buys['markout_5s_per_share'].mean():.4f}" if len(full_bullish_buys) > 0 else "")
+        print(f"  Sold when z_skew<0:   {len(full_bearish_sells):3d} fills, avg markout=${full_bearish_sells['markout_5s_per_share'].mean():.4f}" if len(full_bearish_sells) > 0 else "")
+        print(f"  → TOTAL following signal: {len(full_signal_following):3d} fills, avg markout=${full_avg:.4f}")
+    else:
+        full_avg = 0
+        print(f"  No fills following full z_skew signal")
+
+    print(f"\nResidual z_skew approach:")
+    if len(res_signal_following) > 0:
+        res_avg = res_signal_following['markout_5s_per_share'].mean()
+        print(f"  Bought when residual>0: {len(res_bullish_buys):3d} fills, avg markout=${res_bullish_buys['markout_5s_per_share'].mean():.4f}" if len(res_bullish_buys) > 0 else "")
+        print(f"  Sold when residual<0:   {len(res_bearish_sells):3d} fills, avg markout=${res_bearish_sells['markout_5s_per_share'].mean():.4f}" if len(res_bearish_sells) > 0 else "")
+        print(f"  → TOTAL following signal: {len(res_signal_following):3d} fills, avg markout=${res_avg:.4f}")
+    else:
+        res_avg = 0
+        print(f"  No fills following residual z_skew signal")
+
+    print(f"\nComparison:")
+    if res_avg > full_avg + 0.001:
+        print(f"  ✅ Residual approach is BETTER by {(res_avg - full_avg)*100:.2f}¢/share")
+        print(f"     → Subtracting market_implied improves edge!")
+    elif full_avg > res_avg + 0.001:
+        print(f"  ❌ Full z_skew is BETTER by {(full_avg - res_avg)*100:.2f}¢/share")
+        print(f"     → Residual approach hurts performance, revert to Option 1 or 2")
+    else:
+        print(f"  ≈  Similar performance (within 0.1¢/share)")
+
+    # 5. Bucketed analysis
+    print(f"\nMarkouts by market_implied_move magnitude:")
+    df['market_priced_bucket'] = pd.cut(df['market_implied_move'].abs(),
+                                         bins=[0, 0.01, 0.02, 0.04, np.inf],
+                                         labels=['<1¢', '1-2¢', '2-4¢', '>4¢'])
+
+    for bucket in df['market_priced_bucket'].cat.categories:
+        subset = df[df['market_priced_bucket'] == bucket]
+        if len(subset) > 0:
+            avg_z = subset['z_skew'].abs().mean()
+            avg_res = subset['z_skew_residual'].abs().mean()
+            avg_markout = subset['markout_5s_per_share'].mean()
+            print(f"  {bucket:6s}: {len(subset):3d} fills, |z|={avg_z*100:.2f}¢ → |res|={avg_res*100:.2f}¢, markout=${avg_markout:.4f}")
+
+
 def realized_vol_theo_analysis(df):
     """Test if realized vol theo has predictive power vs implied vol theo."""
     print("\n" + "=" * 80)
@@ -1302,6 +1425,7 @@ def main():
     momentum_analysis(df)
     zscore_predictor_analysis(df)  # NEW: Analyze z-score predictor
     z_skew_analysis(df)  # NEW: Analyze z-score skew (continuous fair value adjustment)
+    z_skew_residual_analysis(df)  # NEW: Analyze residual approach (Option 3 validation)
     theo_value_test(df)
     model_vs_market_test(df)
     adverse_selection_test(df)

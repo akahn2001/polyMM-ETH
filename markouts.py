@@ -5,6 +5,7 @@ import asyncio
 import global_state
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from trading import MAX_IMBALANCE_ADJUSTMENT, MAX_TOTAL_SIGNAL_ADJUSTMENT, MAX_MOMENTUM_ADJUSTMENT
 
 MARKOUT_HORIZONS = [1, 5, 15, 30, 60]          # seconds
 MARKOUT_DUMP_INTERVAL = 1 * 60             # 10 minutes
@@ -173,8 +174,7 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
     # Book imbalance is already calculated and stored in global_state
     imbalance_adj = 0.0
     if book_imbalance != 0.0:
-        # Match trading.py: imbalance_adj = imbalance * MAX_IMBALANCE_ADJUSTMENT
-        MAX_IMBALANCE_ADJUSTMENT = 0.045  # Must match trading.py
+        # Use imported constant from trading.py
         imbalance_adj = book_imbalance * MAX_IMBALANCE_ADJUSTMENT
         # Note: We apply this AFTER z_skew is calculated to cap total adjustment
 
@@ -208,22 +208,20 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
             # Predicted move (includes gamma!)
             predicted_option_move = new_option_price - current_option_price
 
-            # Cap adjustment (match trading.py MAX_MOMENTUM_ADJUSTMENT)
-            predicted_option_move = max(-0.03, min(0.03, predicted_option_move))
+            # Cap adjustment (uses imported constant from trading.py)
+            predicted_option_move = max(-MAX_MOMENTUM_ADJUSTMENT, min(MAX_MOMENTUM_ADJUSTMENT, predicted_option_move))
 
             fair_yes = fair_yes + predicted_option_move
 
     # 3) Apply signal adjustments (book imbalance + z-score residual) with total cap
     # This must match trading.py to ensure fair_yes consistency
     # Calculate z_skew_residual to avoid double-counting what market has already priced
-    MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.025  # Must match trading.py
-
     market_implied_move = market_mid - theo if market_mid and theo else 0.0
     z_skew_residual = z_skew - market_implied_move
 
     total_signal_adj = imbalance_adj + z_skew_residual
 
-    # Cap total adjustment if exceeds limit
+    # Cap total adjustment if exceeds limit (uses imported constant from trading.py)
     if abs(total_signal_adj) > MAX_TOTAL_SIGNAL_ADJUSTMENT:
         # Scale both signals proportionally to stay within cap
         scale_factor = MAX_TOTAL_SIGNAL_ADJUSTMENT / abs(total_signal_adj)
