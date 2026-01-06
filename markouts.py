@@ -5,7 +5,7 @@ import asyncio
 import global_state
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from trading import MAX_IMBALANCE_ADJUSTMENT, MAX_TOTAL_SIGNAL_ADJUSTMENT, MAX_MOMENTUM_ADJUSTMENT
+from trading_config import MAX_IMBALANCE_ADJUSTMENT, MAX_TOTAL_SIGNAL_ADJUSTMENT, MAX_MOMENTUM_ADJUSTMENT
 
 MARKOUT_HORIZONS = [1, 5, 15, 30, 60]          # seconds
 MARKOUT_DUMP_INTERVAL = 1 * 60             # 10 minutes

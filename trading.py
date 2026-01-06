@@ -11,6 +11,14 @@ from global_state import MarketPosition
 from py_clob_client.exceptions import PolyApiException
 from py_clob_client.clob_types import OpenOrderParams
 from util import bs_binary_call
+from trading_config import (
+    MAX_IMBALANCE_ADJUSTMENT,
+    MAX_MOMENTUM_ADJUSTMENT,
+    MAX_Z_SCORE_SKEW,
+    MAX_TOTAL_SIGNAL_ADJUSTMENT,
+    USE_BOOK_IMBALANCE,
+    BOOK_IMBALANCE_LEVELS
+)
 
 # TODO: 12/17 WE STILL AREN'T CANCELLING ORDERS CORRECTLY- currently using print statements to debug the open_orders from api. vs. protected orders set logic
 # TODO: My suspicion is that we are somehow protecting too many orders and this is leaving stale orders in the book
@@ -338,7 +346,7 @@ POST_FILL_COOLDOWN = .33  # seconds to pause quoting on a side after getting fil
 # Binance momentum adjustment
 USE_BINANCE_MOMENTUM = False  # Toggle to use Binance momentum for predictive quoting
 BINANCE_MOMENTUM_LOOKBACK = 0.5  # Seconds to look back for momentum calculation
-MAX_MOMENTUM_ADJUSTMENT = 0.03  # Max price adjustment from momentum (caps at 3 cents)
+# MAX_MOMENTUM_ADJUSTMENT imported from trading_config
 
 # Dynamic spread based on option price sensitivity
 OPTION_MOVE_LOOKBACK = 1.0        # Seconds to look back for BTC move
@@ -346,10 +354,8 @@ OPTION_MOVE_THRESHOLD = 0.02      # 2 cents - start widening when option moved t
 OPTION_MOVE_SPREAD_SCALE = 0.25    # spread multiplier per cent above threshold (was 0.5)
 MAX_OPTION_SPREAD_MULT = 1.0      # was 2.0, decreasing to 1.0 to turn this feature off!
 
-# Book imbalance adjustment
-USE_BOOK_IMBALANCE = True
-BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = .030   # 1/2/26: was .025, changing to .035
+# Book imbalance adjustment - constants imported from trading_config
+# USE_BOOK_IMBALANCE, BOOK_IMBALANCE_LEVELS, MAX_IMBALANCE_ADJUSTMENT
 
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .30    # 1/2/26: was .35, changing to .30
@@ -359,12 +365,9 @@ COINBASE_RTDS_ZSCORE_THRESHOLD = 0.60  # Skip vulnerable side when |z| > 0.70
 Z_SCORE_COMBINED_THRESHOLD = 0.30      # Combined threshold (half of main)
 Z_SKEW_COMBINED_THRESHOLD = 0.025      # 2.5¢ predicted option move threshold for combined rule
 
-# Z-score skew (continuous adjustment based on predicted RTDS movement)
-MAX_Z_SCORE_SKEW = .030 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
+# Z-score skew - MAX_Z_SCORE_SKEW imported from trading_config
 
-# Cap on total signal adjustments (book imbalance + z-score skew combined)
-# Prevents crossing spread when both signals fire strongly in same direction
-MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.025  # Cap combined adjustments at ±2.5¢ from mid
+# Total signal adjustment cap - MAX_TOTAL_SIGNAL_ADJUSTMENT imported from trading_config
 
 VERBOSE = False
 
