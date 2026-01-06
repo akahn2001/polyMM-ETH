@@ -321,7 +321,7 @@ MAX_POSITION = 40
 BASE_SIZE = 10.0 # Base size/max pos was 5 / 30
 #INV_SKEW_PER_SHARE = 0.00050
 
-SKEW_K = .60          # 0.3–1.0, start ~0.6
+SKEW_K = 1.0          # 0.3–1.0, start ~0.6
 SKEW_CAP = 0.04       # max skew in price points (5c)
 
 MIN_PRICE = 0.01
@@ -332,7 +332,7 @@ MIN_TICKS_BUILD = 0   # ticks from touch when building position (more conservati
 MIN_TICKS_REDUCE = 0   # ticks from touch when reducing position (want to get filled)
 MIN_EDGE_TO_QUOTE = 0.02  # minimum edge (in price points) required to quote a side
 
-MIN_ORDER_INTERVAL = .30  # seconds → max 5 orders/sec per market+side, # changed this back to 1
+MIN_ORDER_INTERVAL = .20  # seconds → max 5 orders/sec per market+side, # changed this back to 1
 POST_FILL_COOLDOWN = 1.0  # seconds to pause quoting on a side after getting filled (GTC only)
 
 # Binance momentum adjustment
@@ -349,22 +349,22 @@ MAX_OPTION_SPREAD_MULT = 1.0      # was 2.0, decreasing to 1.0 to turn this feat
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = 0   # 1/2/26: was .025, changing to .035
+MAX_IMBALANCE_ADJUSTMENT = .01   # 1/2/26: was .025, changing to .035
 
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .30    # 1/2/26: was .35, changing to .30
 
 # Coinbase-RTDS z-score threshold (predictive edge detection when using RTDS)
 COINBASE_RTDS_ZSCORE_THRESHOLD = 0.60  # Skip vulnerable side when |z| > 0.70
-Z_SCORE_COMBINED_THRESHOLD = 0.40      # Combined threshold (half of main)
+Z_SCORE_COMBINED_THRESHOLD = 0.30      # Combined threshold (half of main)
 Z_SKEW_COMBINED_THRESHOLD = 0.025      # 2.5¢ predicted option move threshold for combined rule
 
 # Z-score skew (continuous adjustment based on predicted RTDS movement)
-MAX_Z_SCORE_SKEW = 0 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
+MAX_Z_SCORE_SKEW = .01 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
 
 # Cap on total signal adjustments (book imbalance + z-score skew combined)
 # Prevents crossing spread when both signals fire strongly in same direction
-MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.025  # Cap combined adjustments at ±2.5¢ from mid
+MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.020  # Cap combined adjustments at ±2.5¢ from mid
 
 VERBOSE = False
 
@@ -909,7 +909,7 @@ async def _perform_trade_locked(market_id: str):
     # Blend theo (75%) with book mid (25%) for quoting
     # Theo reacts to spot price (Coinbase or blend), book mid anchors to market reality
     theo = info["fair"]  # global_state.fair_value[market_id]
-    fair_yes = 0.50 * theo + 0.50 * book_mid
+    fair_yes = 0.30 * theo + 0.70 * book_mid
 
     # Add momentum adjustment if enabled (uses Coinbase if USE_COINBASE_PRICE=True, else Binance)
     if not USE_BINANCE_MOMENTUM:
