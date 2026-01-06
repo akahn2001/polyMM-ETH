@@ -316,7 +316,7 @@ MIN_EDGE_IOC = 0.06                  # 4 cents minimum edge required after predi
 IOC_COOLDOWN = 5.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
-BASE_QUOTE_SPREAD = 0.040 # .05 base quote, 30 max position, 5 base size was working well
+BASE_QUOTE_SPREAD = 0.050 # .05 base quote, 30 max position, 5 base size was working well
 MAX_POSITION = 40
 BASE_SIZE = 10.0 # Base size/max pos was 5 / 30
 #INV_SKEW_PER_SHARE = 0.00050
@@ -349,7 +349,7 @@ MAX_OPTION_SPREAD_MULT = 1.0      # was 2.0, decreasing to 1.0 to turn this feat
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = .025   # 1/2/26: was .025, changing to .035
+MAX_IMBALANCE_ADJUSTMENT = .030   # 1/2/26: was .025, changing to .035
 
 # Early cancel threshold (option price sensitivity)
 EARLY_CANCEL_OPTION_MOVE = .30    # 1/2/26: was .35, changing to .30
@@ -360,11 +360,11 @@ Z_SCORE_COMBINED_THRESHOLD = 0.30      # Combined threshold (half of main)
 Z_SKEW_COMBINED_THRESHOLD = 0.025      # 2.5¢ predicted option move threshold for combined rule
 
 # Z-score skew (continuous adjustment based on predicted RTDS movement)
-MAX_Z_SCORE_SKEW = .025 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
+MAX_Z_SCORE_SKEW = .030 # Cap z-score skew at ±1.5 cents, DROPPED THIS TO .03 FROM .035, MIGHT NEED TO GO LOWER, BUT Z SKEW IS VERY PREDICTIVE...
 
 # Cap on total signal adjustments (book imbalance + z-score skew combined)
 # Prevents crossing spread when both signals fire strongly in same direction
-MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.020  # Cap combined adjustments at ±2.5¢ from mid
+MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.025  # Cap combined adjustments at ±2.5¢ from mid
 
 VERBOSE = False
 
