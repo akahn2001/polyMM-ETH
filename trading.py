@@ -316,14 +316,14 @@ MIN_EDGE_IOC = 0.06                  # 4 cents minimum edge required after predi
 IOC_COOLDOWN = 5.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
 IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
 IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
-BASE_QUOTE_SPREAD = 0.050 # .05 base quote, 30 max position, 5 base size was working well
+BASE_QUOTE_SPREAD = 0.040 # .05 base quote, 30 max position, 5 base size was working well
 MAX_POSITION = 40
 BASE_SIZE = 10.0 # Base size/max pos was 5 / 30
 #INV_SKEW_PER_SHARE = 0.00050
 
 SKEW_K = .60          # 0.3–1.0, start ~0.6
 SKEW_CAP = 0.04       # max skew in price points (5c)
-alex = "gay"
+
 MIN_PRICE = 0.01
 MAX_PRICE = 0.99
 PRICE_MOVE_TOL = 0.0015          # don't cancel/replace if existing quote is within 0.5c of target

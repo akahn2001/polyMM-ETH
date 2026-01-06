@@ -161,7 +161,13 @@ def overall_performance(df):
             median_per_share = df[per_share_col].median()
             hit_rate = (df[per_share_col] > 0).sum() / len(df) * 100
             _, p_val, is_sig, interp = significance_test(df[per_share_col], null_value=0)
-            print(f"  {horizon}s: mean={avg_per_share:.5f} ({'*** ' if p_val < 0.01 else '** ' if p_val < 0.05 else '* ' if p_val < 0.10 else ''}p={p_val:.4f})")
+
+            # Handle None p_val (not enough samples)
+            if p_val is not None:
+                sig_stars = '*** ' if p_val < 0.01 else '** ' if p_val < 0.05 else '* ' if p_val < 0.10 else ''
+                print(f"  {horizon}s: mean={avg_per_share:.5f} ({sig_stars}p={p_val:.4f})")
+            else:
+                print(f"  {horizon}s: mean={avg_per_share:.5f} (insufficient samples for significance test)")
             print(f"       median={median_per_share:.5f}, hit rate={hit_rate:.1f}%")
 
     print(f"\n{'='*80}")
