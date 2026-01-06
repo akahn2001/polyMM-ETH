@@ -6,7 +6,7 @@ Shared between trading.py and markouts.py to avoid circular imports
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = 0.00  # Max price adjustment from book imbalance
+MAX_IMBALANCE_ADJUSTMENT = 0.01  # Max price adjustment from book imbalance
 
 # Momentum adjustment
 MAX_MOMENTUM_ADJUSTMENT = 0.03    # Max price adjustment from momentum (caps at 3 cents)
