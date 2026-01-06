@@ -927,6 +927,181 @@ def momentum_attribution_analysis(df):
         worst = bad_fills.nsmallest(5, 'markout_5s_per_share')[['timestamp', 'edge_vs_fair', 'markout_5s_per_share', 'momentum', 'momentum_volatility']]
         print(worst.to_string(index=False))
 
+def signal_interaction_analysis(df):
+    """Analyze how z-score skew and book imbalance interact."""
+    print("\n" + "=" * 80)
+    print("SIGNAL INTERACTION ANALYSIS (Z-Skew vs Book Imbalance)")
+    print("=" * 80)
+
+    if 'z_skew' not in df.columns or 'book_imbalance' not in df.columns:
+        print("  ⚠️  Missing z_skew or book_imbalance data")
+        return
+
+    df_signals = df[(df['z_skew'].notna()) & (df['book_imbalance'].notna())].copy()
+    if len(df_signals) == 0:
+        print("  ⚠️  No fills with both signals")
+        return
+
+    # Classify signals as positive/negative/neutral
+    df_signals['z_direction'] = 'neutral'
+    df_signals.loc[df_signals['z_skew'] > 0.005, 'z_direction'] = 'positive'  # >0.5¢
+    df_signals.loc[df_signals['z_skew'] < -0.005, 'z_direction'] = 'negative'  # <-0.5¢
+
+    df_signals['imb_direction'] = 'neutral'
+    df_signals.loc[df_signals['book_imbalance'] > 0.2, 'imb_direction'] = 'positive'
+    df_signals.loc[df_signals['book_imbalance'] < -0.2, 'imb_direction'] = 'negative'
+
+    # Agreement scenarios
+    both_positive = df_signals[(df_signals['z_direction'] == 'positive') & (df_signals['imb_direction'] == 'positive')]
+    both_negative = df_signals[(df_signals['z_direction'] == 'negative') & (df_signals['imb_direction'] == 'negative')]
+    z_pos_imb_neg = df_signals[(df_signals['z_direction'] == 'positive') & (df_signals['imb_direction'] == 'negative')]
+    z_neg_imb_pos = df_signals[(df_signals['z_direction'] == 'negative') & (df_signals['imb_direction'] == 'positive')]
+    both_neutral = df_signals[(df_signals['z_direction'] == 'neutral') & (df_signals['imb_direction'] == 'neutral')]
+
+    print(f"\nSignal Agreement:")
+    print(f"  Both bullish (z>0, imb>0):   {len(both_positive):4d} fills, {both_positive['markout_5s_per_share'].mean()*100:+.2f}¢/share avg")
+    print(f"  Both bearish (z<0, imb<0):   {len(both_negative):4d} fills, {both_negative['markout_5s_per_share'].mean()*100:+.2f}¢/share avg")
+
+    print(f"\nSignal Conflict:")
+    print(f"  Z bullish, Imb bearish:      {len(z_pos_imb_neg):4d} fills, {z_pos_imb_neg['markout_5s_per_share'].mean()*100:+.2f}¢/share avg")
+    print(f"  Z bearish, Imb bullish:      {len(z_neg_imb_pos):4d} fills, {z_neg_imb_pos['markout_5s_per_share'].mean()*100:+.2f}¢/share avg")
+
+    print(f"\nBoth Neutral:")
+    print(f"  No strong signals:           {len(both_neutral):4d} fills, {both_neutral['markout_5s_per_share'].mean()*100:+.2f}¢/share avg")
+
+    # Statistical tests
+    if len(both_positive) > 10 and len(both_neutral) > 10:
+        comparison = compare_groups(both_positive['markout_5s_per_share'], both_neutral['markout_5s_per_share'],
+                                   "Both Agree", "Both Neutral")
+        print(f"\n  Agreement vs Neutral: {comparison}")
+
+        if both_positive['markout_5s_per_share'].mean() > both_neutral['markout_5s_per_share'].mean() + 0.01:
+            print(f"  ✅ Signal AGREEMENT has strong edge - when both align, fills are better!")
+
+    # When signals conflict, which wins?
+    conflict = pd.concat([z_pos_imb_neg, z_neg_imb_pos])
+    if len(conflict) > 20:
+        print(f"\nWhen Signals Conflict:")
+        print(f"  Conflict fills: {len(conflict)} ({len(conflict)/len(df_signals)*100:.1f}% of all fills)")
+        print(f"  Avg markout: {conflict['markout_5s_per_share'].mean()*100:+.2f}¢/share")
+
+        if conflict['markout_5s_per_share'].mean() < both_positive['markout_5s_per_share'].mean() - 0.01:
+            print(f"  ⚠️  Conflicting signals have WORSE markouts - wait for alignment!")
+
+    # Signal strength analysis
+    print(f"\n{'='*80}")
+    print(f"SIGNAL STRENGTH COMBINATIONS")
+    print(f"{'='*80}")
+
+    strong_z = df_signals[abs(df_signals['z_skew']) > 0.015]  # >1.5¢
+    strong_imb = df_signals[abs(df_signals['book_imbalance']) > 0.4]
+
+    both_strong = df_signals[(abs(df_signals['z_skew']) > 0.015) & (abs(df_signals['book_imbalance']) > 0.4)]
+    z_strong_imb_weak = df_signals[(abs(df_signals['z_skew']) > 0.015) & (abs(df_signals['book_imbalance']) <= 0.2)]
+    z_weak_imb_strong = df_signals[(abs(df_signals['z_skew']) <= 0.005) & (abs(df_signals['book_imbalance']) > 0.4)]
+    both_weak = df_signals[(abs(df_signals['z_skew']) <= 0.005) & (abs(df_signals['book_imbalance']) <= 0.2)]
+
+    print(f"  Both strong:        {len(both_strong):4d} fills, {both_strong['markout_5s_per_share'].mean()*100:+.2f}¢/share avg")
+    print(f"  Z strong, Imb weak: {len(z_strong_imb_weak):4d} fills, {z_strong_imb_weak['markout_5s_per_share'].mean()*100:+.2f}¢/share avg")
+    print(f"  Z weak, Imb strong: {len(z_weak_imb_strong):4d} fills, {z_weak_imb_strong['markout_5s_per_share'].mean()*100:+.2f}¢/share avg")
+    print(f"  Both weak:          {len(both_weak):4d} fills, {both_weak['markout_5s_per_share'].mean()*100:+.2f}¢/share avg")
+
+    if len(both_strong) > 10:
+        if both_strong['markout_5s_per_share'].mean() > both_weak['markout_5s_per_share'].mean() + 0.01:
+            print(f"\n  ✅ STRONG signals have better edge - wait for conviction!")
+
+
+def fill_size_distribution_analysis(df):
+    """Analyze if larger fills have worse edge (adverse selection on size)."""
+    print("\n" + "=" * 80)
+    print("FILL SIZE DISTRIBUTION ANALYSIS")
+    print("=" * 80)
+
+    # Size buckets
+    tiny = df[df['qty'] <= 5]
+    small = df[(df['qty'] > 5) & (df['qty'] <= 10)]
+    medium = df[(df['qty'] > 10) & (df['qty'] <= 20)]
+    large = df[(df['qty'] > 20) & (df['qty'] <= 40)]
+    xlarge = df[df['qty'] > 40]
+
+    print(f"\nFill Size Distribution:")
+    print(f"  ≤5 shares:    {len(tiny):4d} fills ({len(tiny)/len(df)*100:4.1f}%), {tiny['qty'].sum():6.0f} shares, {tiny['markout_5s_per_share'].mean()*100:+.2f}¢/share, ${tiny['markout_5s'].sum():+7.2f} PNL")
+    print(f"  6-10 shares:  {len(small):4d} fills ({len(small)/len(df)*100:4.1f}%), {small['qty'].sum():6.0f} shares, {small['markout_5s_per_share'].mean()*100:+.2f}¢/share, ${small['markout_5s'].sum():+7.2f} PNL")
+    print(f"  11-20 shares: {len(medium):4d} fills ({len(medium)/len(df)*100:4.1f}%), {medium['qty'].sum():6.0f} shares, {medium['markout_5s_per_share'].mean()*100:+.2f}¢/share, ${medium['markout_5s'].sum():+7.2f} PNL")
+    print(f"  21-40 shares: {len(large):4d} fills ({len(large)/len(df)*100:4.1f}%), {large['qty'].sum():6.0f} shares, {large['markout_5s_per_share'].mean()*100:+.2f}¢/share, ${large['markout_5s'].sum():+7.2f} PNL")
+    print(f"  >40 shares:   {len(xlarge):4d} fills ({len(xlarge)/len(df)*100:4.1f}%), {xlarge['qty'].sum():6.0f} shares, {xlarge['markout_5s_per_share'].mean()*100:+.2f}¢/share, ${xlarge['markout_5s'].sum():+7.2f} PNL")
+
+    if len(tiny) > 0 and len(xlarge) > 0:
+        comparison = compare_groups(tiny['markout_5s_per_share'], xlarge['markout_5s_per_share'], "Tiny", "XLarge")
+        print(f"\n  Tiny vs XLarge: {comparison}")
+
+        edge_diff = tiny['markout_5s_per_share'].mean() - xlarge['markout_5s_per_share'].mean()
+        if edge_diff > 0.005:  # >0.5¢ difference
+            print(f"\n  ❌ LARGE FILLS WORSE by {edge_diff*100:.2f}¢/share - adverse selection on size!")
+            print(f"     → Reduce BASE_SIZE to improve edge")
+        else:
+            print(f"\n  ✅ No adverse selection on size - order size is fine")
+
+    # What would PNL be if only small fills?
+    small_only = df[df['qty'] <= 10]
+    if len(small_only) > 0:
+        small_pnl = small_only['markout_5s'].sum()
+        total_pnl = df['markout_5s'].sum()
+        small_shares = small_only['qty'].sum()
+        total_shares = df['qty'].sum()
+
+        print(f"\n  Hypothetical: Only fills ≤10 shares")
+        print(f"    PNL: ${small_pnl:+.2f} (actual: ${total_pnl:+.2f})")
+        print(f"    Shares: {small_shares:.0f} (actual: {total_shares:.0f})")
+        print(f"    Edge: {small_pnl/small_shares*100:+.2f}¢/share (actual: {total_pnl/total_shares*100:+.2f}¢/share)")
+
+        if small_pnl/total_pnl > 0.8 and small_shares/total_shares < 0.6:
+            print(f"    ⚠️  80%+ of PNL from <60% of volume - strong signal to reduce size!")
+
+
+def spread_capture_analysis(df):
+    """Analyze spread capture rate and edge distribution."""
+    print("\n" + "=" * 80)
+    print("SPREAD CAPTURE ANALYSIS")
+    print("=" * 80)
+
+    # Need to know spread - check working_params or estimate
+    BASE_SPREAD = 0.055  # Update this if different
+    half_spread = BASE_SPREAD / 2.0
+
+    total_shares = df['qty'].sum()
+    total_pnl = df['markout_5s'].sum()
+    avg_edge_per_share = total_pnl / total_shares
+
+    capture_rate = (avg_edge_per_share / half_spread) * 100
+
+    print(f"\nSpread Capture Metrics:")
+    print(f"  Assumed spread: {BASE_SPREAD*100:.1f}¢ total, {half_spread*100:.2f}¢ half-spread")
+    print(f"  Actual edge: {avg_edge_per_share*100:+.2f}¢/share")
+    print(f"  Capture rate: {capture_rate:.1f}% of half-spread")
+
+    if capture_rate < 30:
+        print(f"  ❌ LOW capture (<30%) - too much adverse selection or spread too wide")
+    elif capture_rate < 45:
+        print(f"  ⚠️  MODERATE capture (30-45%) - room for improvement")
+    else:
+        print(f"  ✅ GOOD capture (>45%) - edge is strong")
+
+    # Edge distribution
+    print(f"\nEdge Distribution (per-share):")
+    bins = [-np.inf, -0.02, -0.01, -0.005, 0, 0.005, 0.01, 0.02, np.inf]
+    labels = ['<-2¢', '-2¢--1¢', '-1¢--0.5¢', '-0.5¢-0', '0-0.5¢', '0.5¢-1¢', '1¢-2¢', '>2¢']
+
+    df['edge_bucket'] = pd.cut(df['markout_5s_per_share'], bins=bins, labels=labels)
+
+    for bucket in labels:
+        subset = df[df['edge_bucket'] == bucket]
+        if len(subset) > 0:
+            pct = len(subset) / len(df) * 100
+            pnl = subset['markout_5s'].sum()
+            print(f"  {bucket:12s}: {len(subset):4d} fills ({pct:4.1f}%), ${pnl:+7.2f} PNL")
+
+
 def maker_vs_taker_analysis(df):
     """Compare performance of maker (GTC) vs taker (IOC) fills."""
     print("\n" + "=" * 80)
@@ -1071,7 +1246,10 @@ def main():
 
     # Run all analyses
     overall_performance(df)
+    spread_capture_analysis(df)  # NEW: Spread capture rate and edge distribution
+    fill_size_distribution_analysis(df)  # NEW: Analyze adverse selection by fill size
     maker_vs_taker_analysis(df)  # NEW: Compare GTC vs IOC fills
+    signal_interaction_analysis(df)  # NEW: Z-skew vs book imbalance interactions
     momentum_analysis(df)
     zscore_predictor_analysis(df)  # NEW: Analyze z-score predictor
     z_skew_analysis(df)  # NEW: Analyze z-score skew (continuous fair value adjustment)
