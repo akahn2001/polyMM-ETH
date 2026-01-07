@@ -114,13 +114,29 @@ async def reconcile_market_orders(market_id: str):
 
     # Repair local tracking if our "bid"/"ask" order is not actually open anymore
     # Acquire lock to prevent race with manage_side() which also modifies wo[]
+    # CRITICAL: Delay clearing filled orders to prevent position limit breaches
+    # When order is missing from open_ids, it could be filled (TRADE event pending) or cancelled
+    # Keep tracking for 1 second to ensure TRADE events are processed into filled_yes first
     async with global_state.position_check_lock:
         for side_key in ("bid", "ask"):
             entry = wo.get(side_key)
             if isinstance(entry, dict):
                 oid = entry.get("id")
                 if oid and oid not in open_ids:
-                    wo[side_key] = None
+                    # Order is no longer open - delay clearing to avoid race with TRADE event processing
+                    last_reconcile_ts = entry.get("reconcile_cleared_ts", 0)
+                    now_ts = time.time()
+
+                    if last_reconcile_ts == 0:
+                        # First reconcile where order is missing - mark timestamp but keep tracking
+                        entry["reconcile_cleared_ts"] = now_ts
+                        if VERBOSE:
+                            print(f"[RECONCILE] Order {oid} not in open_ids, marking for cleanup (will clear in 1s)")
+                    elif now_ts - last_reconcile_ts > 1.0:
+                        # Order has been missing for >1s - safe to clear now (fill should be processed)
+                        wo[side_key] = None
+                        if VERBOSE:
+                            print(f"[RECONCILE] Clearing stale order {oid} from working_orders (>1s since filled)")
 
     # Cancel extras in batches
     if cancel_ids:
