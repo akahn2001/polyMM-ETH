@@ -105,6 +105,10 @@ def process_user_data(rows):
           * from TRADE events for your own trades, but only for status in {"MATCHED", "FILLED"}
     """
 
+    # CRITICAL: Update timestamp for position staleness detection
+    # This timestamp is used to detect when user websocket has stopped sending events
+    global_state.user_ws_last_event_time = time.time()
+
     # --- Normalize `rows` into a list of dicts ---
     if isinstance(rows, dict):
         rows_list = [rows]

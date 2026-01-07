@@ -99,47 +99,54 @@ async def connect_user_websocket(key, secret, passphrase):
     1. Establishes a WebSocket connection to the Polymarket user API
     2. Authenticates using API credentials
     3. Processes incoming order and trade updates for the user
+    4. Automatically reconnects on disconnection or silent failure
 
-    Notes:
-        If the connection is lost, the function will exit and the main loop will
-        attempt to reconnect after a short delay.
+    CRITICAL: This websocket sends TRADE events that update position tracking.
+    Silent disconnections can cause position tracking to freeze while orders continue filling.
     """
     uri = "wss://ws-subscriptions-clob.polymarket.com/ws/user"
 
-    async with websockets.connect(uri, ping_interval=5, ping_timeout=None) as websocket:
-        # Disable Nagle's algorithm for lower latency
-        _set_tcp_nodelay(websocket)
-
-        # Prepare authentication message with API credentials
-        message = {
-            "type": "user",
-            "auth": {
-                "apiKey": key,
-                "secret": secret,
-                "passphrase": passphrase
-            }
-        }
-
-        # Send authentication message
-        await websocket.send(orjson.dumps(message).decode('utf-8'))
-
-        print("\n")
-        print(f"Sent user subscription message")
-
+    while True:  # Reconnection loop
         try:
-            # Process incoming user data indefinitely
-            while True:
-                message = await websocket.recv()
-                json_data = orjson.loads(message)
-                # Process trade and order updates
-                #print(json_data)
-                process_user_data(json_data) # TODO: bring back websocket so can process user data
+            print("[USER WS] Attempting connection...")
+            async with websockets.connect(uri, ping_interval=5, ping_timeout=None) as websocket:
+                # Disable Nagle's algorithm for lower latency
+                _set_tcp_nodelay(websocket)
+
+                # Prepare authentication message with API credentials
+                message = {
+                    "type": "user",
+                    "auth": {
+                        "apiKey": key,
+                        "secret": secret,
+                        "passphrase": passphrase
+                    }
+                }
+
+                # Send authentication message
+                await websocket.send(orjson.dumps(message).decode('utf-8'))
+
+                print("[USER WS] Connected and authenticated")
+
+                # Process incoming user data with timeout to detect silent disconnections
+                while True:
+                    try:
+                        # Timeout after 60 seconds - if no ORDER/TRADE events, reconnect
+                        # This prevents hanging forever on silent disconnections
+                        message = await asyncio.wait_for(websocket.recv(), timeout=60)
+                        json_data = orjson.loads(message)
+                        # Process trade and order updates
+                        process_user_data(json_data)
+                    except asyncio.TimeoutError:
+                        print("[USER WS] No message received for 60s - forcing reconnection")
+                        break  # Exit inner loop to trigger reconnection
+
         except websockets.ConnectionClosed:
-            print("Connection closed in user websocket")
+            print("[USER WS] Connection closed, reconnecting in 5s...")
             print(traceback.format_exc())
         except Exception as e:
-            print(f"Exception in user websocket: {e}")
+            print(f"[USER WS] Exception: {e}, reconnecting in 5s...")
             print(traceback.format_exc())
-        finally:
-            # Brief delay before attempting to reconnect
-            await asyncio.sleep(5)
+
+        # Brief delay before attempting to reconnect
+        await asyncio.sleep(5)

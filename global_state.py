@@ -78,6 +78,7 @@ client = None
 timestamp = None
 mid_price = None
 rtds_last_update_time = None  # Track when RTDS last updated (for staleness detection)
+user_ws_last_event_time = None  # Track when user websocket last sent ORDER/TRADE event (for position staleness detection)
 
 # Binance price stream data (BTCUSDT)
 binance_mid_price = None

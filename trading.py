@@ -964,6 +964,41 @@ async def _perform_trade_locked(market_id: str):
                     pass
         return
 
+    # CRITICAL: Check if user websocket events are stale (prevent position tracking freeze)
+    # If user websocket is dead, TRADE events won't be processed and filled_yes will be frozen
+    # This can cause catastrophic position limit breaches
+    USER_WS_STALENESS_THRESHOLD = 90  # seconds - conservative since we might not get events if no fills
+    user_ws_last_event = getattr(global_state, 'user_ws_last_event_time', None)
+
+    if user_ws_last_event is not None:
+        time_since_user_ws_event = now - user_ws_last_event
+        if time_since_user_ws_event > USER_WS_STALENESS_THRESHOLD:
+            # User websocket is stale - position tracking may be frozen
+            # Cancel all orders and halt trading until websocket reconnects
+            if not hasattr(global_state, '_user_ws_stale_warning_printed') or now - global_state._user_ws_stale_warning_printed > 60:
+                print(f"⚠️  [CRITICAL] USER WEBSOCKET IS STALE ({time_since_user_ws_event:.1f}s since last event)!")
+                print(f"    Position tracking may be frozen. Canceling all orders and halting trading.")
+                print(f"    Threshold: {USER_WS_STALENESS_THRESHOLD}s. Waiting for user websocket reconnection...")
+                global_state._user_ws_stale_warning_printed = now
+
+            # Cancel all working orders to prevent position tracking desync
+            working = global_state.working_orders_by_market.get(market_id, {})
+            if working:
+                order_ids = []
+                for side_key in ["bid", "ask"]:
+                    entry = working.get(side_key)
+                    if entry and isinstance(entry, dict):
+                        oid = entry.get("id")
+                        if oid:
+                            order_ids.append(oid)
+                if order_ids:
+                    try:
+                        await asyncio.wait_for(global_state.client.cancel_orders(order_ids), timeout=2.0)
+                        print(f"    Canceled {len(order_ids)} orders due to stale user websocket")
+                    except:
+                        pass
+            return
+
     #return # TODO: return to prevent even printing
     if VERBOSE:
         print(f"[MM] perform_trade called for market_id={market_id}, dry_run={getattr(global_state, 'dry_run', None)}")
