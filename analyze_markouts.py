@@ -924,6 +924,166 @@ def z_skew_residual_analysis(df):
             print(f"  {bucket:6s}: {len(subset):3d} fills, |z|={avg_z*100:.2f}¢ → |res|={avg_res*100:.2f}¢, markout=${avg_markout:.4f}")
 
 
+def sigmoid_zscore_analysis(df):
+    """Analyze sigmoid confidence scaling - does filtering by z-score magnitude improve edge?"""
+    print("\n" + "=" * 80)
+    print("SIGMOID Z-SCORE CONFIDENCE ANALYSIS")
+    print("=" * 80)
+
+    required_cols = ['zscore', 'z_skew', 'dir_yes', 'markout_5s_per_share']
+    if not all(col in df.columns for col in required_cols):
+        print("  ⚠️  Required columns not in data")
+        return
+
+    # Filter to only fills where we had a z-score signal
+    df_with_z = df[df['zscore'].abs() > 0.001].copy()
+
+    if len(df_with_z) == 0:
+        print("  ⚠️  No fills with z-score signal")
+        return
+
+    print(f"Analyzing {len(df_with_z)} fills with z-score signal\n")
+
+    # 1. Overall z-score distribution
+    avg_zscore = df_with_z['zscore'].abs().mean()
+    max_zscore = df_with_z['zscore'].abs().max()
+
+    print(f"Z-score distribution:")
+    print(f"  Avg |zscore|: {avg_zscore:.2f}")
+    print(f"  Max |zscore|: {max_zscore:.2f}")
+
+    # Sigmoid confidence parameters (should match trading_config.py)
+    MIDPOINT = 0.4
+    STEEPNESS = 5.0
+
+    # Calculate confidence for each fill
+    df_with_z['z_confidence'] = 1.0 / (1.0 + np.exp(-STEEPNESS * (df_with_z['zscore'].abs() - MIDPOINT)))
+    avg_confidence = df_with_z['z_confidence'].mean()
+    print(f"  Avg confidence: {avg_confidence:.2f} (sigmoid with midpoint={MIDPOINT}, steepness={STEEPNESS})\n")
+
+    # 2. Bucket by |zscore| magnitude to see confidence effect
+    print(f"Markouts by z-score magnitude (validates sigmoid filtering):")
+
+    # Define buckets aligned with sigmoid confidence levels
+    bins = [0, 0.2, 0.4, 0.6, 1.0, np.inf]
+    labels = ['<0.2', '0.2-0.4', '0.4-0.6', '0.6-1.0', '>1.0']
+    df_with_z['zscore_bucket'] = pd.cut(df_with_z['zscore'].abs(), bins=bins, labels=labels)
+
+    for bucket in labels:
+        subset = df_with_z[df_with_z['zscore_bucket'] == bucket]
+        if len(subset) == 0:
+            continue
+
+        avg_conf = subset['z_confidence'].mean()
+        avg_zscore_val = subset['zscore'].abs().mean()
+        avg_z_skew = subset['z_skew'].abs().mean()
+
+        # Calculate markouts when following signal direction
+        following = subset[((subset['z_skew'] > 0) & (subset['dir_yes'] == 1)) |
+                          ((subset['z_skew'] < 0) & (subset['dir_yes'] == -1))]
+
+        # Calculate markouts when going against signal direction
+        against = subset[((subset['z_skew'] > 0) & (subset['dir_yes'] == -1)) |
+                        ((subset['z_skew'] < 0) & (subset['dir_yes'] == 1))]
+
+        avg_markout = subset['markout_5s_per_share'].mean()
+        avg_markout_following = following['markout_5s_per_share'].mean() if len(following) > 0 else 0
+        avg_markout_against = against['markout_5s_per_share'].mean() if len(against) > 0 else 0
+
+        print(f"  |z|={bucket:8s}: {len(subset):3d} fills, conf={avg_conf:.2f}, "
+              f"|z_skew|={avg_z_skew*100:.2f}¢")
+        print(f"              Following signal: {len(following):3d} fills, "
+              f"markout=${avg_markout_following:.4f}")
+        if len(against) > 0:
+            print(f"              Against signal:   {len(against):3d} fills, "
+                  f"markout=${avg_markout_against:.4f}")
+
+    # 3. Compare low vs high confidence fills
+    print(f"\nLow vs High Confidence Performance:")
+
+    low_conf = df_with_z[df_with_z['zscore'].abs() < MIDPOINT]  # Low confidence (<50%)
+    high_conf = df_with_z[df_with_z['zscore'].abs() >= MIDPOINT]  # High confidence (≥50%)
+
+    # Following signal for each group
+    low_following = low_conf[((low_conf['z_skew'] > 0) & (low_conf['dir_yes'] == 1)) |
+                             ((low_conf['z_skew'] < 0) & (low_conf['dir_yes'] == -1))]
+    high_following = high_conf[((high_conf['z_skew'] > 0) & (high_conf['dir_yes'] == 1)) |
+                               ((high_conf['z_skew'] < 0) & (high_conf['dir_yes'] == -1))]
+
+    print(f"\nLow confidence (|z| < {MIDPOINT}):")
+    print(f"  Total fills: {len(low_conf)}")
+    print(f"  Following signal: {len(low_following)} fills, "
+          f"avg markout=${low_following['markout_5s_per_share'].mean():.4f}" if len(low_following) > 0 else "  No fills following signal")
+
+    print(f"\nHigh confidence (|z| ≥ {MIDPOINT}):")
+    print(f"  Total fills: {len(high_conf)}")
+    print(f"  Following signal: {len(high_following)} fills, "
+          f"avg markout=${high_following['markout_5s_per_share'].mean():.4f}" if len(high_following) > 0 else "  No fills following signal")
+
+    # 4. Statistical comparison
+    if len(low_following) > 0 and len(high_following) > 0:
+        low_avg = low_following['markout_5s_per_share'].mean()
+        high_avg = high_following['markout_5s_per_share'].mean()
+
+        print(f"\nSigmoid filtering effectiveness:")
+        if high_avg > low_avg + 0.0005:
+            print(f"  ✅ High confidence fills are BETTER by {(high_avg - low_avg)*100:.2f}¢/share")
+            print(f"     → Sigmoid is correctly filtering noise!")
+        elif low_avg > high_avg + 0.0005:
+            print(f"  ⚠️  Low confidence fills are BETTER by {(low_avg - high_avg)*100:.2f}¢/share")
+            print(f"     → Sigmoid may be over-filtering or parameters need tuning")
+        else:
+            print(f"  ≈  Similar performance (within 0.05¢/share)")
+            print(f"     → Sigmoid has neutral effect, consider adjusting MIDPOINT/STEEPNESS")
+
+    # 5. Directional analysis - favorable vs unfavorable
+    print(f"\n" + "=" * 80)
+    print(f"DIRECTIONAL ANALYSIS (Favorable vs Unfavorable)")
+    print(f"=" * 80)
+
+    # Favorable = following signal direction
+    favorable = df_with_z[((df_with_z['z_skew'] > 0) & (df_with_z['dir_yes'] == 1)) |
+                          ((df_with_z['z_skew'] < 0) & (df_with_z['dir_yes'] == -1))]
+
+    # Unfavorable = against signal direction
+    unfavorable = df_with_z[((df_with_z['z_skew'] > 0) & (df_with_z['dir_yes'] == -1)) |
+                            ((df_with_z['z_skew'] < 0) & (df_with_z['dir_yes'] == 1))]
+
+    print(f"\nFavorable direction (following z_skew signal):")
+    if len(favorable) > 0:
+        # Bucket by magnitude in favorable direction
+        bins_mag = [0, 0.01, 0.02, 0.03, np.inf]
+        labels_mag = ['<1¢', '1-2¢', '2-3¢', '>3¢']
+        favorable['z_skew_mag'] = pd.cut(favorable['z_skew'].abs(), bins=bins_mag, labels=labels_mag)
+
+        for mag_bucket in labels_mag:
+            subset = favorable[favorable['z_skew_mag'] == mag_bucket]
+            if len(subset) == 0:
+                continue
+            avg_markout = subset['markout_5s_per_share'].mean()
+            avg_zscore = subset['zscore'].abs().mean()
+            print(f"  |z_skew|={mag_bucket:6s}: {len(subset):3d} fills, "
+                  f"avg |z|={avg_zscore:.2f}, markout=${avg_markout:.4f}")
+    else:
+        print("  No favorable fills")
+
+    print(f"\nUnfavorable direction (against z_skew signal):")
+    if len(unfavorable) > 0:
+        # Bucket by magnitude in unfavorable direction
+        unfavorable['z_skew_mag'] = pd.cut(unfavorable['z_skew'].abs(), bins=bins_mag, labels=labels_mag)
+
+        for mag_bucket in labels_mag:
+            subset = unfavorable[unfavorable['z_skew_mag'] == mag_bucket]
+            if len(subset) == 0:
+                continue
+            avg_markout = subset['markout_5s_per_share'].mean()
+            avg_zscore = subset['zscore'].abs().mean()
+            print(f"  |z_skew|={mag_bucket:6s}: {len(subset):3d} fills, "
+                  f"avg |z|={avg_zscore:.2f}, markout=${avg_markout:.4f}")
+    else:
+        print("  No unfavorable fills")
+
+
 def realized_vol_theo_analysis(df):
     """Test if realized vol theo has predictive power vs implied vol theo."""
     print("\n" + "=" * 80)
@@ -1426,6 +1586,7 @@ def main():
     zscore_predictor_analysis(df)  # NEW: Analyze z-score predictor
     z_skew_analysis(df)  # NEW: Analyze z-score skew (continuous fair value adjustment)
     z_skew_residual_analysis(df)  # NEW: Analyze residual approach (Option 3 validation)
+    sigmoid_zscore_analysis(df)  # NEW: Analyze sigmoid confidence scaling effectiveness
     theo_value_test(df)
     model_vs_market_test(df)
     adverse_selection_test(df)
