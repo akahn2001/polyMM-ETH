@@ -7,10 +7,27 @@ import requests
 
 def check_fee_rate(token_id: str):
     """Check if a market has taker fees enabled"""
+
+    # Try the documented endpoint
     url = f"https://clob.polymarket.com/fee-rate?token_id={token_id}"
 
     try:
         response = requests.get(url, timeout=5)
+
+        if response.status_code == 404:
+            print(f"Token ID: {token_id}")
+            print("Status: ⚠️  API ENDPOINT NOT FOUND (404)")
+            print()
+            print("Possible reasons:")
+            print("  1. Fee rate API not deployed yet (docs ahead of implementation)")
+            print("  2. Fees not enabled on this market yet")
+            print("  3. Need different endpoint or authentication")
+            print()
+            print("Recommendation: Assume fees WILL be enabled soon")
+            print("  → Keep MIN_TICKS_BUILD = 0 to quote as maker")
+            print("  → Monitor Polymarket announcements for fee rollout")
+            return None
+
         response.raise_for_status()
         data = response.json()
 
@@ -29,6 +46,9 @@ def check_fee_rate(token_id: str):
 
         return data
 
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error: {e}")
+        return None
     except Exception as e:
         print(f"Error: {e}")
         return None

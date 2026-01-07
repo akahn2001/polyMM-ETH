@@ -130,7 +130,8 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
 
     # Z-score tracking (Coinbase-RTDS spread predictor)
     zscore = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
-    z_skew = getattr(global_state, 'z_skew_by_market', {}).get(market_id, 0.0)
+    z_skew = getattr(global_state, 'z_skew_by_market', {}).get(market_id, 0.0)  # capped, for display
+    z_skew_residual_from_trading = getattr(global_state, 'z_skew_residual_by_market', {}).get(market_id, 0.0)  # what was actually used
 
     # Vol edge = realized - implied (positive means market underpricing vol)
     vol_edge_5m = (realized_vol_5m - implied_vol) if (realized_vol_5m is not None and implied_vol is not None) else None
@@ -215,9 +216,11 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
 
     # 3) Apply signal adjustments (book imbalance + z-score residual) with total cap
     # This must match trading.py to ensure fair_yes consistency
-    # Calculate z_skew_residual to avoid double-counting what market has already priced
+    # Use the residual that was already calculated in trading.py (avoids recalculation errors)
+    z_skew_residual = z_skew_residual_from_trading  # already capped and calculated correctly
+
+    # Also store market_implied_move for analysis
     market_implied_move = market_mid - theo if market_mid and theo else 0.0
-    z_skew_residual = z_skew - market_implied_move
 
     total_signal_adj = imbalance_adj + z_skew_residual
 

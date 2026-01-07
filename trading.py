@@ -17,7 +17,9 @@ from trading_config import (
     MAX_Z_SCORE_SKEW,
     MAX_TOTAL_SIGNAL_ADJUSTMENT,
     USE_BOOK_IMBALANCE,
-    BOOK_IMBALANCE_LEVELS
+    BOOK_IMBALANCE_LEVELS,
+    Z_SCORE_CONFIDENCE_MIDPOINT,
+    Z_SCORE_CONFIDENCE_STEEPNESS
 )
 
 # TODO: 12/17 WE STILL AREN'T CANCELLING ORDERS CORRECTLY- currently using print statements to debug the open_orders from api. vs. protected orders set logic
@@ -1188,19 +1190,27 @@ async def _perform_trade_locked(market_id: str):
                     future_option = bs_binary_call(S_current + predicted_rtds_move, K, T, 0.0, sigma, 0.0, 1.0)
 
                     # Z-skew is the predicted option value change
-                    z_skew = future_option - current_option
+                    z_skew_raw = future_option - current_option
 
-                    # Cap the skew
-                    z_skew = max(-MAX_Z_SCORE_SKEW, min(MAX_Z_SCORE_SKEW, z_skew))
+                    # Apply sigmoid confidence scaling based on z_score magnitude
+                    # This filters noise when z_score is small (low signal) and amplifies when z_score is large (high signal)
+                    z_score_abs = abs(z_score)
+                    z_confidence = 1.0 / (1.0 + math.exp(-Z_SCORE_CONFIDENCE_STEEPNESS * (z_score_abs - Z_SCORE_CONFIDENCE_MIDPOINT)))
+                    z_skew_adjusted = z_skew_raw * z_confidence
 
-                    # Calculate residual: subtract what market has already priced
-                    # market_implied_move = how much market is pricing above/below theo
-                    # z_skew_residual = predicted move minus what's already priced
+                    # Calculate residual from adjusted z_skew (not raw)
+                    # This correctly compares sigmoid-scaled prediction vs full market move
                     market_implied_move = book_mid - theo
-                    z_skew_residual = z_skew - market_implied_move
+                    z_skew_residual = z_skew_adjusted - market_implied_move
+
+                    # Cap the residual (what we'll actually use)
+                    z_skew_residual = max(-MAX_Z_SCORE_SKEW, min(MAX_Z_SCORE_SKEW, z_skew_residual))
+
+                    # Store capped adjusted z_skew for display/diagnostics (sigmoid-adjusted)
+                    z_skew = max(-MAX_Z_SCORE_SKEW, min(MAX_Z_SCORE_SKEW, z_skew_adjusted))
 
                     if VERBOSE and abs(market_implied_move) > 0.01:
-                        print(f"[MM] Z-skew decomposition: full={z_skew:.4f}, market_priced={market_implied_move:.4f}, residual={z_skew_residual:.4f}")
+                        print(f"[MM] Z-skew: raw={z_skew_raw:.4f}, conf={z_confidence:.2f}, adjusted={z_skew_adjusted:.4f}, market_priced={market_implied_move:.4f}, residual={z_skew_residual:.4f}")
 
     # Apply signal adjustments (book imbalance + z-score residual skew) with total cap
     # This prevents crossing the spread when both signals fire strongly in same direction
@@ -1227,14 +1237,14 @@ async def _perform_trade_locked(market_id: str):
     fair_adj_yes += total_signal_adj
 
     # Store z-score skew for display and markout tracking
-    # Store both full z_skew and z_skew_residual for diagnostics
+    # Store both capped z_skew (for display) and residual (for quoting)
     if not hasattr(global_state, 'z_skew_by_market'):
         global_state.z_skew_by_market = {}
-    global_state.z_skew_by_market[market_id] = z_skew
+    global_state.z_skew_by_market[market_id] = z_skew  # capped, for display
 
     if not hasattr(global_state, 'z_skew_residual_by_market'):
         global_state.z_skew_residual_by_market = {}
-    global_state.z_skew_residual_by_market[market_id] = z_skew_residual
+    global_state.z_skew_residual_by_market[market_id] = z_skew_residual  # capped residual, actually used
 
     # Store imbalance adjustment for markout tracking
     if not hasattr(global_state, 'imbalance_adj_by_market'):
