@@ -77,6 +77,7 @@ client = None
 
 timestamp = None
 mid_price = None
+rtds_last_update_time = None  # Track when RTDS last updated (for staleness detection)
 
 # Binance price stream data (BTCUSDT)
 binance_mid_price = None

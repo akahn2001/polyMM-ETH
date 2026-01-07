@@ -98,9 +98,14 @@ async def stream_btc_usd():
                 # Start background ping task
                 asyncio.create_task(ping_loop(ws))
 
-                # Listen for messages forever
+                # Listen for messages with timeout to detect silent disconnections
                 while True:
-                    msg = await ws.recv()
+                    try:
+                        # Timeout after 35 seconds - if no messages, reconnect
+                        msg = await asyncio.wait_for(ws.recv(), timeout=35)
+                    except asyncio.TimeoutError:
+                        print("[RTDS] No message received for 35s - forcing reconnection")
+                        break  # Exit inner loop to trigger reconnection
 
                     # RTDS messages are JSON
                     try:
@@ -111,6 +116,7 @@ async def stream_btc_usd():
                             mid_price = data["payload"]["data"][0]["value"]
                             global_state.mid_price = mid_price
                             global_state.timestamp = timestamp
+                            global_state.rtds_last_update_time = time.time()  # Track staleness
 
                             # Mark RTDS as connected on first successful price
                             if not global_state.rtds_connected:
@@ -140,6 +146,7 @@ async def stream_btc_usd():
                             mid_price = data["payload"]["value"]
                             global_state.mid_price = mid_price
                             global_state.timestamp = timestamp
+                            global_state.rtds_last_update_time = time.time()  # Track staleness
 
                             # Mark RTDS as connected on first successful price
                             if not global_state.rtds_connected:

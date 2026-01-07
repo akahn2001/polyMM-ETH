@@ -898,6 +898,56 @@ async def _perform_trade_locked(market_id: str):
     Internal implementation of perform_trade() - assumes caller holds market lock.
     """
     now = time.time()  # Cache time once for this call
+
+    # CRITICAL: Check if price data is stale (prevent trading on disconnected/frozen websocket)
+    PRICE_STALENESS_THRESHOLD = 30  # seconds
+    price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
+
+    # Check appropriate price feed based on PRICE_SOURCE
+    if price_source == "RTDS":
+        last_update = getattr(global_state, 'rtds_last_update_time', None)
+        source_name = "RTDS"
+    elif price_source == "COINBASE":
+        last_update = getattr(global_state, 'coinbase_mid_ts', None)
+        source_name = "Coinbase"
+    elif price_source == "BLEND":
+        # For blended price, check both RTDS and Binance
+        rtds_update = getattr(global_state, 'rtds_last_update_time', None)
+        binance_update = getattr(global_state, 'binance_mid_ts', None)
+        if rtds_update is None or binance_update is None:
+            return
+        last_update = min(rtds_update, binance_update)  # Check oldest of the two
+        source_name = "Blended (RTDS+Binance)"
+    else:
+        last_update = None
+        source_name = "Unknown"
+
+    if last_update is None:
+        # Price feed has never received data - don't trade
+        return
+
+    time_since_update = now - last_update
+    if time_since_update > PRICE_STALENESS_THRESHOLD:
+        # Price is stale - websocket may be silently disconnected
+        # Cancel all orders and wait for fresh data
+        if not hasattr(global_state, '_price_stale_warning_printed') or now - global_state._price_stale_warning_printed > 60:
+            print(f"⚠️  [CRITICAL] {source_name} PRICE IS STALE ({time_since_update:.1f}s old)! Canceling all orders and halting trading.")
+            print(f"    Last price update: {time_since_update:.1f}s ago (threshold: {PRICE_STALENESS_THRESHOLD}s)")
+            print(f"    Websocket may be silently disconnected. Waiting for reconnection...")
+            global_state._price_stale_warning_printed = now
+
+        # Cancel all working orders to prevent trading on stale prices
+        working = global_state.working_orders_by_market.get(market_id, {})
+        if working:
+            order_ids = list(working.keys())
+            if order_ids:
+                try:
+                    await asyncio.wait_for(global_state.client.cancel_orders(order_ids), timeout=2.0)
+                    print(f"    Canceled {len(order_ids)} orders due to stale {source_name} price")
+                except:
+                    pass
+        return
+
     #return # TODO: return to prevent even printing
     if VERBOSE:
         print(f"[MM] perform_trade called for market_id={market_id}, dry_run={getattr(global_state, 'dry_run', None)}")
