@@ -46,9 +46,9 @@ def _update_coinbase_rtds_zscore(coinbase_mid_usd: float):
     global_state.coinbase_rtds_zscore_history.append((now, spread))
 
     # Calculate z-score from recent window
-    LOOKBACK_SECONDS = 5 * 60  # 5 minutes
-    MIN_SAMPLES = 30           # Need 30+ samples for valid stats
-    MIN_STD_DEV = 0.10         # Ignore if spread too stable ($0.10 threshold)
+    LOOKBACK_SECONDS = 10 * 60  # 10 minutes
+    MIN_SAMPLES = 200           # Need 200+ samples for stable stats
+    MIN_STD_DEV = 0.10          # Ignore if spread too stable ($0.10 threshold)
 
     cutoff_time = now - LOOKBACK_SECONDS
     recent_spreads = [s for (ts, s) in global_state.coinbase_rtds_zscore_history if ts >= cutoff_time]
