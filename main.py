@@ -58,7 +58,13 @@ def update_periodically(client):
     while True:
         #print(global_state.working_orders_by_market)
         #print("POS: ", global_state.positions_by_market)
-        print(global_state.positions_by_market, global_state.fair_value)
+        # Print only active market position instead of entire dict
+        active_market = global_state.active_market_id
+        if active_market:
+            pos = global_state.positions_by_market.get(active_market)
+            fair = global_state.fair_value.get(active_market)
+            pos_str = f"net_yes={pos.net_yes:.1f}" if pos else "no position"
+            print(f"Active: {active_market[:8]}... | Pos: {pos_str} | Fair: {fair:.4f}" if fair else f"Active: {active_market[:8]}... | Pos: {pos_str}")
 
         # Update USDT/USD exchange rate every 60 seconds
         current_time = time.time()

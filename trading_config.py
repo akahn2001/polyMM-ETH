@@ -6,13 +6,13 @@ Shared between trading.py and markouts.py to avoid circular imports
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = 0.025  # Max price adjustment from book imbalance
+MAX_IMBALANCE_ADJUSTMENT = 0.030  # Max price adjustment from book imbalance
 
 # Momentum adjustment
 MAX_MOMENTUM_ADJUSTMENT = 0.03    # Max price adjustment from momentum (caps at 3 cents)
 
 # Z-score skew (continuous adjustment based on predicted RTDS movement)
-MAX_Z_SCORE_SKEW = 0.035          # Cap z-score skew at ±3.5 cents
+MAX_Z_SCORE_SKEW = 0.045          # Cap z-score skew at ±3.5 cents
 
 # Z-score confidence scaling (sigmoid function to filter noise)
 # Scales z_skew based on z_score magnitude to avoid amplifying noise with high gamma
