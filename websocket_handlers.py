@@ -128,6 +128,10 @@ async def connect_user_websocket(key, secret, passphrase):
 
                 print("[USER WS] Connected and authenticated")
 
+                # Reset staleness timer on successful connection
+                # This prevents false positives when connected but no ORDER/TRADE events
+                global_state.user_ws_last_event_time = time.time()
+
                 # Process incoming user data with timeout to detect silent disconnections
                 while True:
                     try:
