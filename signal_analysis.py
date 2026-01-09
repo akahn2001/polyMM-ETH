@@ -67,8 +67,8 @@ def create_2d_heatmap(df, signal1_name, signal1_bins, signal2_name, signal2_bins
                       for i in range(len(signal2_bins)-1)]
 
     # Bucket the data
-    df['sig1_bucket'] = pd.cut(df[signal1_name], bins=signal1_bins, labels=signal1_labels, include_lowest=True)
-    df['sig2_bucket'] = pd.cut(df[signal2_name], bins=signal2_bins, labels=signal2_labels, include_lowest=True)
+    df['sig1_bucket'] = pd.cut(df[signal1_name], bins=signal1_bins, labels=signal1_labels, include_lowest=True, ordered=False)
+    df['sig2_bucket'] = pd.cut(df[signal2_name], bins=signal2_bins, labels=signal2_labels, include_lowest=True, ordered=False)
 
     # Group by both buckets
     results = []
