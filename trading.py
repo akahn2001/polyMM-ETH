@@ -19,7 +19,11 @@ from trading_config import (
     USE_BOOK_IMBALANCE,
     BOOK_IMBALANCE_LEVELS,
     Z_SCORE_CONFIDENCE_MIDPOINT,
-    Z_SCORE_CONFIDENCE_STEEPNESS
+    Z_SCORE_CONFIDENCE_STEEPNESS,
+    AGGRESSIVE_MODE_ENABLED,
+    AGGRESSIVE_Z_THRESHOLD,
+    AGGRESSIVE_ZSKEW_THRESHOLD,
+    AGGRESSIVE_MAX_TOTAL_ADJUSTMENT
 )
 
 # TODO: 12/17 WE STILL AREN'T CANCELLING ORDERS CORRECTLY- currently using print statements to debug the open_orders from api. vs. protected orders set logic
@@ -1257,6 +1261,7 @@ async def _perform_trade_locked(market_id: str):
     # We calculate the RESIDUAL skew (what market hasn't already priced)
     z_skew = 0.0
     z_skew_residual = 0.0
+    z_skew_raw = 0.0  # Track uncapped z_skew for aggressive mode detection
     z_score = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
     if z_score != 0.0:
         # Use cached spread std (calculated in coinbase_price_stream when z-score updates)
@@ -1322,10 +1327,24 @@ async def _perform_trade_locked(market_id: str):
     original_imbalance_adj = imbalance_adj
     original_z_skew_residual = z_skew_residual
 
+    # Aggressive mode: increase cap when high conviction signals align
+    # Conditions: |z_score| > threshold, |z_skew_raw| > threshold, z and imbalance same sign
+    aggressive_mode = (
+        AGGRESSIVE_MODE_ENABLED and
+        abs(z_score) > AGGRESSIVE_Z_THRESHOLD and
+        abs(z_skew_raw) > AGGRESSIVE_ZSKEW_THRESHOLD and
+        z_score * book_imbalance > 0  # same signs = aligned (both bullish or both bearish)
+    )
+
+    effective_cap = AGGRESSIVE_MAX_TOTAL_ADJUSTMENT if aggressive_mode else MAX_TOTAL_SIGNAL_ADJUSTMENT
+
+    if aggressive_mode:
+        print(f"[MM] AGGRESSIVE MODE: z={z_score:.2f}, z_skew_raw={z_skew_raw:.4f}, imb={book_imbalance:.2f}, cap={effective_cap:.4f}")
+
     # Cap total adjustment if exceeds limit
-    if abs(total_signal_adj) > MAX_TOTAL_SIGNAL_ADJUSTMENT:
+    if abs(total_signal_adj) > effective_cap:
         # Scale both signals proportionally to stay within cap
-        scale_factor = MAX_TOTAL_SIGNAL_ADJUSTMENT / abs(total_signal_adj)
+        scale_factor = effective_cap / abs(total_signal_adj)
         imbalance_adj *= scale_factor
         z_skew_residual *= scale_factor
         total_signal_adj = imbalance_adj + z_skew_residual
@@ -1368,8 +1387,20 @@ async def _perform_trade_locked(market_id: str):
     ticks_bid = MIN_TICKS_REDUCE if net_yes < 0 else MIN_TICKS_BUILD
     ticks_ask = MIN_TICKS_REDUCE if net_yes > 0 else MIN_TICKS_BUILD
 
-    target_bid_yes = min(target_bid_yes, best_bid_yes - ticks_bid * TICK_SIZE)
-    target_ask_yes = max(target_ask_yes, best_ask_yes + ticks_ask * TICK_SIZE)
+    # In aggressive mode, only skip back-off on the side with predicted edge
+    # z_score > 0 (bullish) -> allow bid to cross, keep ask backed off
+    # z_score < 0 (bearish) -> allow ask to cross, keep bid backed off
+    if aggressive_mode:
+        if z_score > 0:
+            # Bullish - skip bid back-off to allow crossing, keep ask backed off
+            target_ask_yes = max(target_ask_yes, best_ask_yes + ticks_ask * TICK_SIZE)
+        else:
+            # Bearish - skip ask back-off to allow crossing, keep bid backed off
+            target_bid_yes = min(target_bid_yes, best_bid_yes - ticks_bid * TICK_SIZE)
+    else:
+        # Normal mode - back off on both sides
+        target_bid_yes = min(target_bid_yes, best_bid_yes - ticks_bid * TICK_SIZE)
+        target_ask_yes = max(target_ask_yes, best_ask_yes + ticks_ask * TICK_SIZE)
 
     # 3) re-clip + re-tick (keep it clean)
     target_bid_yes = max(MIN_PRICE, min(MAX_PRICE, tick_down(target_bid_yes, TICK_SIZE)))

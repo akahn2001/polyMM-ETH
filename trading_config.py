@@ -6,7 +6,7 @@ Shared between trading.py and markouts.py to avoid circular imports
 # Book imbalance adjustment
 USE_BOOK_IMBALANCE = True
 BOOK_IMBALANCE_LEVELS = 4         # how many price levels to consider (0 for all)
-MAX_IMBALANCE_ADJUSTMENT = 0.025  # Max price adjustment from book imbalance
+MAX_IMBALANCE_ADJUSTMENT = 0.030  # Max price adjustment from book imbalance
 
 # Momentum adjustment
 MAX_MOMENTUM_ADJUSTMENT = 0.03    # Max price adjustment from momentum (caps at 3 cents)
@@ -21,4 +21,11 @@ Z_SCORE_CONFIDENCE_STEEPNESS = 5.0  # How sharp the sigmoid transition is
 
 # Cap on total signal adjustments (book imbalance + z-score skew combined)
 # Prevents crossing spread when both signals fire strongly in same direction
-MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.0275  # Cap combined adjustments at ±3.0¢ from mid
+MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.0275  # Cap combined adjustments at ±2.75¢ from mid
+
+# Aggressive mode: increase cap when high conviction signals align
+# Allows crossing spread to take liquidity when edge is high
+AGGRESSIVE_MODE_ENABLED = True
+AGGRESSIVE_Z_THRESHOLD = 2.0          # Minimum |z-score| to trigger aggressive mode
+AGGRESSIVE_ZSKEW_THRESHOLD = 0.07     # Minimum |z_skew_raw| (6¢ predicted option move)
+AGGRESSIVE_MAX_TOTAL_ADJUSTMENT = 0.0375  # 3.75¢ cap when aggressive (crosses spread by 1 tick)
