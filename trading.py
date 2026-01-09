@@ -23,7 +23,8 @@ from trading_config import (
     AGGRESSIVE_MODE_ENABLED,
     AGGRESSIVE_Z_THRESHOLD,
     AGGRESSIVE_ZSKEW_THRESHOLD,
-    AGGRESSIVE_MAX_TOTAL_ADJUSTMENT
+    AGGRESSIVE_MAX_TOTAL_ADJUSTMENT,
+    AGGRESSIVE_MAX_Z_SCORE_SKEW
 )
 
 # TODO: 12/17 WE STILL AREN'T CANCELLING ORDERS CORRECTLY- currently using print statements to debug the open_orders from api. vs. protected orders set logic
@@ -1309,23 +1310,11 @@ async def _perform_trade_locked(market_id: str):
                     market_implied_move = book_mid - theo
                     z_skew_residual = z_skew_adjusted - market_implied_move
 
-                    # Cap the residual (what we'll actually use)
-                    z_skew_residual = max(-MAX_Z_SCORE_SKEW, min(MAX_Z_SCORE_SKEW, z_skew_residual))
-
-                    # Store capped adjusted z_skew for display/diagnostics (sigmoid-adjusted)
-                    z_skew = max(-MAX_Z_SCORE_SKEW, min(MAX_Z_SCORE_SKEW, z_skew_adjusted))
+                    # Store adjusted z_skew (capping happens later, after aggressive_mode is determined)
+                    z_skew = z_skew_adjusted
 
                     if VERBOSE and abs(market_implied_move) > 0.01:
                         print(f"[MM] Z-skew: raw={z_skew_raw:.4f}, conf={z_confidence:.2f}, adjusted={z_skew_adjusted:.4f}, market_priced={market_implied_move:.4f}, residual={z_skew_residual:.4f}")
-
-    # Apply signal adjustments (book imbalance + z-score residual skew) with total cap
-    # This prevents crossing the spread when both signals fire strongly in same direction
-    # Use z_skew_residual to avoid double-counting what market has already priced
-    total_signal_adj = imbalance_adj + z_skew_residual
-
-    # Track original values for diagnostics
-    original_imbalance_adj = imbalance_adj
-    original_z_skew_residual = z_skew_residual
 
     # Aggressive mode: increase cap when high conviction signals align
     # Conditions: |z_score| > threshold, |z_skew_raw| > threshold, z and imbalance same sign
@@ -1336,6 +1325,20 @@ async def _perform_trade_locked(market_id: str):
         z_score * book_imbalance > 0  # same signs = aligned (both bullish or both bearish)
     )
 
+    # Cap z_skew and z_skew_residual - use higher cap in aggressive mode
+    z_skew_cap = AGGRESSIVE_MAX_Z_SCORE_SKEW if aggressive_mode else MAX_Z_SCORE_SKEW
+    z_skew = max(-z_skew_cap, min(z_skew_cap, z_skew))
+    z_skew_residual = max(-z_skew_cap, min(z_skew_cap, z_skew_residual))
+
+    # Apply signal adjustments (book imbalance + z-score residual skew) with total cap
+    # This prevents crossing the spread when both signals fire strongly in same direction
+    # Use z_skew_residual to avoid double-counting what market has already priced
+    total_signal_adj = imbalance_adj + z_skew_residual
+
+    # Track original values for diagnostics (after z_skew cap but before total cap)
+    original_imbalance_adj = imbalance_adj
+    original_z_skew_residual = z_skew_residual
+
     effective_cap = AGGRESSIVE_MAX_TOTAL_ADJUSTMENT if aggressive_mode else MAX_TOTAL_SIGNAL_ADJUSTMENT
 
     # Store aggressive_mode in global_state for markout tracking
@@ -1344,7 +1347,7 @@ async def _perform_trade_locked(market_id: str):
     global_state.aggressive_mode_by_market[market_id] = aggressive_mode
 
     if aggressive_mode:
-        print(f"[MM] AGGRESSIVE MODE: z={z_score:.2f}, z_skew_raw={z_skew_raw:.4f}, imb={book_imbalance:.2f}, cap={effective_cap:.4f}")
+        print(f"[MM] AGGRESSIVE MODE: z={z_score:.2f}, z_skew_raw={z_skew_raw:.4f}, z_skew_res={z_skew_residual:.4f}, imb={book_imbalance:.2f}, z_cap={z_skew_cap:.4f}, total_cap={effective_cap:.4f}")
 
     # Cap total adjustment if exceeds limit
     if abs(total_signal_adj) > effective_cap:
