@@ -155,35 +155,29 @@ def create_2d_heatmap(df, signal1_name, signal1_bins, signal2_name, signal2_bins
 
 def print_2d_heatmap(df, signal1_name, signal2_name):
     """Print 2D heatmap in readable format."""
-    print(f"\n{'='*100}")
-    print(f"2D HEATMAP: {signal1_name.upper()} vs {signal2_name.upper()}")
-    print(f"{'='*100}\n")
+    print(f"\n{'='*80}")
+    print(f"2D HEATMAP: {signal1_name.upper()} (rows) vs {signal2_name.upper()} (cols)")
+    print(f"{'='*80}\n")
 
     if len(df) == 0:
         print("No data in any buckets\n")
         return
 
-    # Get unique buckets
-    sig1_buckets = df['sig1_bucket'].unique()
-    sig2_buckets = df['sig2_bucket'].unique()
+    # Get unique buckets and sort them
+    sig1_buckets = sorted(df['sig1_bucket'].unique(), key=str)
+    sig2_buckets = sorted(df['sig2_bucket'].unique(), key=str)
 
-    # Print header
-    print(f"{'Signal 1 →':<20}", end='')
-    for s2 in sig2_buckets:
-        print(f"{s2:<35}", end='')
-    print("\nSignal 2 ↓\n")
+    # Print as a simple list instead of grid (more readable)
+    print(f"{'ROW ('+signal1_name+')':<20} {'COL ('+signal2_name+')':<20} {'N':>5} {'Markout':>10} {'WinRate':>8}")
+    print("-" * 70)
 
-    # Print each row
     for s1 in sig1_buckets:
-        print(f"{s1:<20}", end='')
         for s2 in sig2_buckets:
             cell = df[(df['sig1_bucket'] == s1) & (df['sig2_bucket'] == s2)]
             if len(cell) > 0:
                 row = cell.iloc[0]
-                print(f"n={row['following_fills']:3d} mkout={row['avg_markout']:+.4f} wr={row['win_rate']:.2f}  ", end='')
-            else:
-                print(f"{'---':<35}", end='')
-        print()
+                if row['following_fills'] > 0:
+                    print(f"{str(s1):<20} {str(s2):<20} {row['following_fills']:>5} {row['avg_markout']:>+10.4f} {row['win_rate']:>8.1%}")
 
     print()
 
