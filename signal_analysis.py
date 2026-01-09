@@ -417,10 +417,10 @@ def main():
     if df is None:
         return
 
-    # Define buckets for each signal (finer granularity)
-    zscore_bins = [-np.inf, -2.0, -1.5, -1.0, -0.6, -0.3, 0, 0.3, 0.6, 1.0, 1.5, 2.0, np.inf]
-    zskew_bins = [-np.inf, -0.03, -0.02, -0.015, -0.01, -0.005, 0, 0.005, 0.01, 0.015, 0.02, 0.03, np.inf]  # in dollars
-    imbalance_bins = [-1, -0.5, -0.3, -0.15, 0, 0.15, 0.3, 0.5, 1]
+    # Define buckets for each signal
+    zscore_bins = [-np.inf, -2.0, -0.6, 0, 0.6, 2.0, np.inf]
+    zskew_bins = [-np.inf, -0.02, -0.01, 0, 0.01, 0.02, np.inf]  # in dollars (2¢, 1¢)
+    imbalance_bins = [-1, -0.3, 0, 0.3, 1]
 
     # ========== 2D HEATMAP ANALYSIS ==========
 
