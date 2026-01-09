@@ -21,7 +21,14 @@ def load_data():
         print("Run the bot to generate fill data first.")
         return None
 
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, on_bad_lines='skip')
+
+    # Calculate per-share markouts (CSV contains total PNL, need to divide by qty)
+    for horizon in [1, 5, 15, 30, 60]:
+        col = f'markout_{horizon}s'
+        per_share_col = f'markout_{horizon}s_per_share'
+        if col in df.columns and 'qty' in df.columns:
+            df[per_share_col] = df[col] / df['qty']
 
     # Filter to fills with required columns
     required = ['zscore', 'z_skew', 'book_imbalance', 'dir_yes', 'markout_5s_per_share']
