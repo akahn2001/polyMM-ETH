@@ -28,5 +28,5 @@ MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.0275  # Cap combined adjustments at ±2.75¢ fro
 AGGRESSIVE_MODE_ENABLED = True
 AGGRESSIVE_Z_THRESHOLD = 2.0          # Minimum |z-score| to trigger aggressive mode
 AGGRESSIVE_ZSKEW_THRESHOLD = 0.07     # Minimum |z_skew_raw| (6¢ predicted option move)
-AGGRESSIVE_MAX_TOTAL_ADJUSTMENT = 0.040  # 4¢ cap when aggressive (crosses spread by 1+ tick)
+AGGRESSIVE_MAX_TOTAL_ADJUSTMENT = 0.050  # 4¢ cap when aggressive (crosses spread by 1+ tick)
 AGGRESSIVE_MAX_Z_SCORE_SKEW = 0.050     # Allow 4.5¢ z_skew in aggressive mode (vs 3.5¢ normal)
