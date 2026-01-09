@@ -167,17 +167,24 @@ def print_2d_heatmap(df, signal1_name, signal2_name):
     sig1_buckets = sorted(df['sig1_bucket'].unique(), key=str)
     sig2_buckets = sorted(df['sig2_bucket'].unique(), key=str)
 
-    # Print as a simple list instead of grid (more readable)
-    print(f"{'ROW ('+signal1_name+')':<20} {'COL ('+signal2_name+')':<20} {'N':>5} {'Markout':>10} {'WinRate':>8}")
-    print("-" * 70)
-
+    # Collect all cells with data and sort by markout (best first)
+    rows = []
     for s1 in sig1_buckets:
         for s2 in sig2_buckets:
             cell = df[(df['sig1_bucket'] == s1) & (df['sig2_bucket'] == s2)]
             if len(cell) > 0:
                 row = cell.iloc[0]
-                if row['following_fills'] > 0:
-                    print(f"{str(s1):<20} {str(s2):<20} {row['following_fills']:>5} {row['avg_markout']:>+10.4f} {row['win_rate']:>8.1%}")
+                if row['following_fills'] >= 5:  # Minimum 5 fills for significance
+                    rows.append((str(s1), str(s2), row['following_fills'], row['avg_markout'], row['win_rate']))
+
+    # Sort by markout descending (best setups first)
+    rows.sort(key=lambda x: x[3], reverse=True)
+
+    print(f"{'ROW ('+signal1_name+')':<20} {'COL ('+signal2_name+')':<20} {'N':>5} {'Markout':>10} {'WinRate':>8}")
+    print("-" * 70)
+
+    for s1, s2, n, markout, wr in rows:
+        print(f"{s1:<20} {s2:<20} {n:>5} {markout:>+10.4f} {wr:>8.1%}")
 
     print()
 
@@ -410,10 +417,10 @@ def main():
     if df is None:
         return
 
-    # Define buckets for each signal
-    zscore_bins = [-np.inf, -0.6, -0.3, 0, 0.3, 0.6, np.inf]
-    zskew_bins = [-np.inf, -0.02, -0.01, 0, 0.01, 0.02, np.inf]  # in dollars (2¢, 1¢)
-    imbalance_bins = [-1, -0.3, -0.1, 0.1, 0.3, 1]
+    # Define buckets for each signal (finer granularity)
+    zscore_bins = [-np.inf, -2.0, -1.5, -1.0, -0.6, -0.3, 0, 0.3, 0.6, 1.0, 1.5, 2.0, np.inf]
+    zskew_bins = [-np.inf, -0.03, -0.02, -0.015, -0.01, -0.005, 0, 0.005, 0.01, 0.015, 0.02, 0.03, np.inf]  # in dollars
+    imbalance_bins = [-1, -0.5, -0.3, -0.15, 0, 0.15, 0.3, 0.5, 1]
 
     # ========== 2D HEATMAP ANALYSIS ==========
 
