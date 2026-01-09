@@ -133,6 +133,9 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
     z_skew = getattr(global_state, 'z_skew_by_market', {}).get(market_id, 0.0)  # capped, for display
     z_skew_residual_from_trading = getattr(global_state, 'z_skew_residual_by_market', {}).get(market_id, 0.0)  # what was actually used
 
+    # Aggressive mode tracking
+    aggressive_mode = getattr(global_state, 'aggressive_mode_by_market', {}).get(market_id, False)
+
     # Vol edge = realized - implied (positive means market underpricing vol)
     vol_edge_5m = (realized_vol_5m - implied_vol) if (realized_vol_5m is not None and implied_vol is not None) else None
     vol_edge_15m = (realized_vol_15m - implied_vol) if (realized_vol_15m is not None and implied_vol is not None) else None
@@ -303,6 +306,7 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
         "market_implied_move": market_implied_move,  # What market has already priced (book_mid - theo)
         "z_skew_residual": z_skew_residual,  # Applied z_skew after subtracting what market priced
         "imbalance_adj": imbalance_adj,  # Applied fair value adjustment from book imbalance (in cents, capped)
+        "aggressive_mode": aggressive_mode,  # Whether aggressive mode was active (higher signal cap)
     })
 
 def _pct(vals, p):
@@ -419,7 +423,7 @@ def _write_detailed_fills_csv():
             "momentum", "momentum_volatility", "delta", "zscore", "z_skew",
             "theo", "binance_theo", "market_mid", "fair_yes",
             "edge_vs_theo", "edge_vs_fair", "model_vs_market",
-            "net_yes_before", "net_yes_after", "book_imbalance",
+            "net_yes_before", "net_yes_after", "book_imbalance", "aggressive_mode",
             "implied_vol", "realized_vol_5m", "realized_vol_15m", "vol_edge_5m", "vol_edge_15m", "realized_vol_theo",
             "markout_1s", "markout_5s", "markout_15s", "markout_30s", "markout_60s"
         ]
@@ -466,6 +470,7 @@ def _write_detailed_fills_csv():
                 "net_yes_before": rec.get("net_yes_before"),
                 "net_yes_after": net_after,
                 "book_imbalance": rec.get("book_imbalance"),
+                "aggressive_mode": rec.get("aggressive_mode", False),
                 "implied_vol": rec.get("implied_vol"),
                 "realized_vol_5m": rec.get("realized_vol_5m"),
                 "realized_vol_15m": rec.get("realized_vol_15m"),

@@ -1508,6 +1508,124 @@ def maker_vs_taker_analysis(df):
         else:
             print(f"  ❌ Both maker and taker are losing!")
 
+def aggressive_mode_analysis(df):
+    """Analyze performance of aggressive mode fills vs normal fills."""
+    print("\n" + "=" * 80)
+    print("AGGRESSIVE MODE ANALYSIS")
+    print("=" * 80)
+
+    if 'aggressive_mode' not in df.columns:
+        print("  ⚠️  aggressive_mode not in data - run with updated trading code")
+        print("     Delete detailed_fills.csv and restart bot to get this data")
+        return
+
+    # Split by aggressive mode
+    aggressive = df[df['aggressive_mode'] == True]
+    normal = df[df['aggressive_mode'] == False]
+
+    print(f"\n  Fill counts:")
+    print(f"    Normal mode:     {len(normal):>6} fills")
+    print(f"    Aggressive mode: {len(aggressive):>6} fills ({len(aggressive)/len(df)*100:.1f}%)")
+
+    if len(aggressive) < 5:
+        print(f"\n  ⚠️  Too few aggressive fills ({len(aggressive)}) for meaningful analysis")
+        print("     Need more data - aggressive mode triggers when:")
+        print("       - |z_score| > AGGRESSIVE_Z_THRESHOLD")
+        print("       - |z_skew_raw| > AGGRESSIVE_ZSKEW_THRESHOLD")
+        print("       - z_score and book_imbalance have same sign (aligned)")
+        return
+
+    print(f"\n  Per-share markout comparison:")
+    print(f"  {'Horizon':<10} {'Normal':<20} {'Aggressive':<20} {'Difference'}")
+    print(f"  {'-'*10} {'-'*20} {'-'*20} {'-'*20}")
+
+    for horizon in [1, 5, 15, 30, 60]:
+        per_share_col = f'markout_{horizon}s_per_share'
+        if per_share_col not in df.columns:
+            continue
+
+        normal_mean = normal[per_share_col].mean() if len(normal) > 0 else 0
+        aggressive_mean = aggressive[per_share_col].mean() if len(aggressive) > 0 else 0
+        diff = aggressive_mean - normal_mean
+
+        # Significance test comparing the two groups
+        comparison = compare_groups(
+            aggressive[per_share_col],
+            normal[per_share_col],
+            name1="Aggressive",
+            name2="Normal"
+        )
+
+        # Extract stars from comparison
+        stars = ""
+        if "***" in comparison:
+            stars = "***"
+        elif "**" in comparison:
+            stars = "**"
+        elif "*" in comparison:
+            stars = "*"
+
+        print(f"  {horizon}s:       {normal_mean:>+.5f}           {aggressive_mean:>+.5f}           {diff:>+.5f} {stars}")
+
+    # Hit rate comparison
+    print(f"\n  Hit rate comparison (% of fills with positive markout):")
+    for horizon in [5, 15]:
+        per_share_col = f'markout_{horizon}s_per_share'
+        if per_share_col not in df.columns:
+            continue
+
+        normal_hit = (normal[per_share_col] > 0).sum() / len(normal) * 100 if len(normal) > 0 else 0
+        aggressive_hit = (aggressive[per_share_col] > 0).sum() / len(aggressive) * 100 if len(aggressive) > 0 else 0
+
+        print(f"    {horizon}s: Normal {normal_hit:.1f}%, Aggressive {aggressive_hit:.1f}%")
+
+    # Total PNL contribution
+    print(f"\n  Total PNL contribution:")
+    for horizon in [5, 15]:
+        col = f'markout_{horizon}s'
+        if col not in df.columns:
+            continue
+
+        normal_pnl = normal[col].sum() if len(normal) > 0 else 0
+        aggressive_pnl = aggressive[col].sum() if len(aggressive) > 0 else 0
+        total_pnl = normal_pnl + aggressive_pnl
+
+        normal_pct = normal_pnl / total_pnl * 100 if total_pnl != 0 else 0
+        aggressive_pct = aggressive_pnl / total_pnl * 100 if total_pnl != 0 else 0
+
+        print(f"    {horizon}s: Normal ${normal_pnl:+.2f} ({normal_pct:.0f}%), Aggressive ${aggressive_pnl:+.2f} ({aggressive_pct:.0f}%)")
+
+    # Statistical test for 5s markout
+    print(f"\n  Statistical comparison (5s markout):")
+    if 'markout_5s_per_share' in df.columns:
+        comparison = compare_groups(
+            aggressive['markout_5s_per_share'],
+            normal['markout_5s_per_share'],
+            name1="Aggressive",
+            name2="Normal"
+        )
+        print(f"    {comparison}")
+
+    # Verdict
+    print(f"\n  Verdict:")
+    if len(aggressive) >= MIN_SAMPLES_FOR_SIGNIFICANCE and 'markout_5s_per_share' in df.columns:
+        aggressive_mean = aggressive['markout_5s_per_share'].mean()
+        normal_mean = normal['markout_5s_per_share'].mean()
+
+        if aggressive_mean > normal_mean + 0.002:
+            print(f"    ✅ Aggressive mode outperforms normal by {(aggressive_mean-normal_mean)*100:.2f}¢/share")
+            print(f"       → Consider making aggressive mode trigger more often")
+        elif aggressive_mean > normal_mean:
+            print(f"    ✅ Aggressive mode slightly better (+{(aggressive_mean-normal_mean)*100:.2f}¢/share)")
+        elif aggressive_mean > -0.001:
+            print(f"    ⚠️  Aggressive mode similar to normal ({(aggressive_mean-normal_mean)*100:.2f}¢/share)")
+        else:
+            print(f"    ❌ Aggressive mode underperforms by {(normal_mean-aggressive_mean)*100:.2f}¢/share")
+            print(f"       → Consider tightening aggressive mode thresholds or disabling")
+    else:
+        print(f"    ⚠️  Need more aggressive mode fills for reliable verdict")
+
+
 def summary_and_diagnosis(df):
     """Overall diagnosis and recommendations."""
     print("\n" + "=" * 80)
@@ -1581,6 +1699,7 @@ def main():
     spread_capture_analysis(df)  # NEW: Spread capture rate and edge distribution
     fill_size_distribution_analysis(df)  # NEW: Analyze adverse selection by fill size
     maker_vs_taker_analysis(df)  # NEW: Compare GTC vs IOC fills
+    aggressive_mode_analysis(df)  # NEW: Compare aggressive vs normal mode fills
     signal_interaction_analysis(df)  # NEW: Z-skew vs book imbalance interactions
     momentum_analysis(df)
     zscore_predictor_analysis(df)  # NEW: Analyze z-score predictor

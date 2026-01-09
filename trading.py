@@ -1338,6 +1338,11 @@ async def _perform_trade_locked(market_id: str):
 
     effective_cap = AGGRESSIVE_MAX_TOTAL_ADJUSTMENT if aggressive_mode else MAX_TOTAL_SIGNAL_ADJUSTMENT
 
+    # Store aggressive_mode in global_state for markout tracking
+    if not hasattr(global_state, 'aggressive_mode_by_market'):
+        global_state.aggressive_mode_by_market = {}
+    global_state.aggressive_mode_by_market[market_id] = aggressive_mode
+
     if aggressive_mode:
         print(f"[MM] AGGRESSIVE MODE: z={z_score:.2f}, z_skew_raw={z_skew_raw:.4f}, imb={book_imbalance:.2f}, cap={effective_cap:.4f}")
 
