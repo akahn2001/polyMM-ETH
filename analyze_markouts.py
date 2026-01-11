@@ -1715,8 +1715,8 @@ def aggressive_mode_analysis(df):
         # For aggressive fills, calculate alignment strength (z_score * book_imbalance)
         agg_with_signals = aggressive[aggressive['book_imbalance'].notna()].copy()
 
-        if 'z_score' in agg_with_signals.columns and len(agg_with_signals) > 0:
-            agg_with_signals['alignment_strength'] = agg_with_signals['z_score'] * agg_with_signals['book_imbalance']
+        if 'zscore' in agg_with_signals.columns and len(agg_with_signals) > 0:
+            agg_with_signals['alignment_strength'] = agg_with_signals['zscore'] * agg_with_signals['book_imbalance']
 
             # Bucket by alignment strength
             strong_aligned = agg_with_signals[agg_with_signals['alignment_strength'] > 1.0]
@@ -1770,7 +1770,7 @@ def aggressive_mode_analysis(df):
                     print(f"\n  💡 Strong alignment ({strong_avg*100:+.2f}¢) >> weak alignment ({weak_avg*100:+.2f}¢)")
                     print(f"     → Consider requiring alignment_strength > 0.3 for aggressive mode")
         else:
-            print(f"  ⚠️  z_score column not available for alignment analysis")
+            print(f"  ⚠️  zscore column not available for alignment analysis")
 
 
 def summary_and_diagnosis(df):
