@@ -20,13 +20,34 @@ MIN_SAMPLES = 10
 
 
 def load_fills(filepath="markouts/detailed_fills.csv"):
-    """Load fills data from CSV."""
+    """Load fills data from CSV and compute per-share markouts."""
     try:
-        df = pd.read_csv(filepath)
+        df = pd.read_csv(filepath, on_bad_lines='skip')
         print(f"Loaded {len(df)} fills from {filepath}")
+
+        # Calculate per-share markouts (CSV contains total PNL, need to divide by qty)
+        for horizon in [1, 5, 15, 30, 60]:
+            col = f'markout_{horizon}s'
+            per_share_col = f'markout_{horizon}s_per_share'
+            if col in df.columns and 'qty' in df.columns:
+                df[per_share_col] = df[col] / df['qty']
+
+        # Validate required columns
+        required = ['fill_yes', 'dir_yes', 'qty', 'markout_5s']
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            print(f"Error: Missing required columns: {missing}")
+            print(f"Available columns: {list(df.columns)}")
+            sys.exit(1)
+
+        print(f"Calculated per-share markouts")
         return df
+
     except FileNotFoundError:
         print(f"Error: Could not find {filepath}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error loading CSV: {e}")
         sys.exit(1)
 
 
