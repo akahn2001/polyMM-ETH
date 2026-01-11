@@ -326,7 +326,7 @@ def summary_and_recommendations(df):
 
 def main():
     # Load data
-    filepath = sys.argv[1] if len(sys.argv) > 1 else "detailed_fills.csv"
+    filepath = sys.argv[1] if len(sys.argv) > 1 else "markouts/detailed_fills.csv"
     df = load_fills(filepath)
 
     # Run analyses
