@@ -402,6 +402,87 @@ def inventory_analysis(df):
     else:
         print("  ✅ Better markouts when building - good position management")
 
+    # Position size bucket analysis - key for tuning SKEW_K
+    print(f"\n  {'='*60}")
+    print(f"  MARKOUTS BY POSITION SIZE AT FILL (for tuning SKEW_K)")
+    print(f"  {'='*60}")
+
+    df['abs_position'] = abs(df['net_yes_before'])
+
+    # Define position buckets
+    buckets = [
+        ("0-10 shares", df[df['abs_position'] <= 10]),
+        ("10-30 shares", df[(df['abs_position'] > 10) & (df['abs_position'] <= 30)]),
+        ("30-50 shares", df[(df['abs_position'] > 30) & (df['abs_position'] <= 50)]),
+        ("50-75 shares", df[(df['abs_position'] > 50) & (df['abs_position'] <= 75)]),
+        ("75+ shares", df[df['abs_position'] > 75]),
+    ]
+
+    print(f"\n  {'Position':<15} {'Fills':<8} {'5s ¢/share':<14} {'15s ¢/share':<14} {'$ PNL':<12}")
+    print(f"  {'-'*15} {'-'*8} {'-'*14} {'-'*14} {'-'*12}")
+
+    position_markouts = []
+    for name, subset in buckets:
+        if len(subset) > 0:
+            m5 = subset['markout_5s_per_share'].mean() * 100
+            m15 = subset['markout_15s_per_share'].mean() * 100 if 'markout_15s_per_share' in subset.columns else 0
+            pnl = subset['markout_5s'].sum() if 'markout_5s' in subset.columns else 0
+            print(f"  {name:<15} {len(subset):<8} {m5:>+.2f}¢         {m15:>+.2f}¢         ${pnl:>+.2f}")
+            position_markouts.append((name, len(subset), m5))
+        else:
+            print(f"  {name:<15} {'0':<8} {'-':<14} {'-':<14} {'-':<12}")
+
+    # Check for adverse selection at large positions
+    small_pos = df[df['abs_position'] <= 20]
+    large_pos = df[df['abs_position'] > 40]
+
+    if len(small_pos) >= MIN_SAMPLES_FOR_SIGNIFICANCE and len(large_pos) >= MIN_SAMPLES_FOR_SIGNIFICANCE:
+        small_avg = small_pos['markout_5s_per_share'].mean()
+        large_avg = large_pos['markout_5s_per_share'].mean()
+
+        print(f"\n  Small position (≤20) vs Large position (>40):")
+        comparison = compare_groups(large_pos['markout_5s_per_share'], small_pos['markout_5s_per_share'],
+                                   "Large pos", "Small pos")
+        print(f"    {comparison}")
+
+        if large_avg < small_avg - 0.005:
+            print(f"\n  ⚠️  ADVERSE SELECTION: Large positions have worse markouts ({large_avg*100:+.2f}¢ vs {small_avg*100:+.2f}¢)")
+            print(f"     → Consider INCREASING SKEW_K to reduce position faster")
+        elif large_avg > small_avg + 0.005:
+            print(f"\n  ✅ Large positions have BETTER markouts ({large_avg*100:+.2f}¢ vs {small_avg*100:+.2f}¢)")
+            print(f"     → SKEW_K might be too high, could lower it to hold positions longer")
+        else:
+            print(f"\n  ✅ Position size doesn't significantly affect markouts - SKEW_K looks appropriate")
+
+    # Fills adding vs reducing at large positions
+    print(f"\n  At large positions (>30 shares), adding vs reducing:")
+    large_pos_all = df[df['abs_position'] > 30]
+    if len(large_pos_all) > 0:
+        adding = large_pos_all[
+            ((large_pos_all['dir_yes'] == 1) & (large_pos_all['net_yes_before'] > 0)) |
+            ((large_pos_all['dir_yes'] == -1) & (large_pos_all['net_yes_before'] < 0))
+        ]
+        reducing = large_pos_all[
+            ((large_pos_all['dir_yes'] == 1) & (large_pos_all['net_yes_before'] < 0)) |
+            ((large_pos_all['dir_yes'] == -1) & (large_pos_all['net_yes_before'] > 0))
+        ]
+
+        if len(adding) > 0:
+            add_m5 = adding['markout_5s_per_share'].mean() * 100
+            print(f"    Adding to position:   {len(adding):>4} fills, {add_m5:>+.2f}¢/share")
+        if len(reducing) > 0:
+            red_m5 = reducing['markout_5s_per_share'].mean() * 100
+            print(f"    Reducing position:    {len(reducing):>4} fills, {red_m5:>+.2f}¢/share")
+
+        if len(adding) >= 5 and len(reducing) >= 5:
+            add_avg = adding['markout_5s_per_share'].mean()
+            red_avg = reducing['markout_5s_per_share'].mean()
+            if add_avg < red_avg - 0.005:
+                print(f"    ⚠️  Adding at large pos is worse - SKEW_K too low, getting run over")
+            elif add_avg > red_avg + 0.005:
+                print(f"    ✅ Adding at large pos is better - capturing good opportunities")
+
+
 def directional_bias(df):
     """Check for directional bias in fills."""
     print("\n" + "=" * 80)
@@ -1624,6 +1705,72 @@ def aggressive_mode_analysis(df):
             print(f"       → Consider tightening aggressive mode thresholds or disabling")
     else:
         print(f"    ⚠️  Need more aggressive mode fills for reliable verdict")
+
+    # Aggressive fills by book imbalance magnitude
+    if 'book_imbalance' in df.columns and len(aggressive) >= 5:
+        print(f"\n  {'='*60}")
+        print(f"  AGGRESSIVE MODE BY BOOK IMBALANCE MAGNITUDE")
+        print(f"  {'='*60}")
+
+        # For aggressive fills, calculate alignment strength (z_score * book_imbalance)
+        agg_with_signals = aggressive[aggressive['book_imbalance'].notna()].copy()
+
+        if 'z_score' in agg_with_signals.columns and len(agg_with_signals) > 0:
+            agg_with_signals['alignment_strength'] = agg_with_signals['z_score'] * agg_with_signals['book_imbalance']
+
+            # Bucket by alignment strength
+            strong_aligned = agg_with_signals[agg_with_signals['alignment_strength'] > 1.0]
+            medium_aligned = agg_with_signals[(agg_with_signals['alignment_strength'] > 0.3) & (agg_with_signals['alignment_strength'] <= 1.0)]
+            weak_aligned = agg_with_signals[(agg_with_signals['alignment_strength'] > 0) & (agg_with_signals['alignment_strength'] <= 0.3)]
+            misaligned = agg_with_signals[agg_with_signals['alignment_strength'] <= 0]
+
+            print(f"\n  By alignment strength (z_score × book_imbalance):")
+            print(f"  {'Alignment':<25} {'Fills':<10} {'5s ¢/share':<15} {'15s ¢/share':<15}")
+            print(f"  {'-'*25} {'-'*10} {'-'*15} {'-'*15}")
+
+            for name, subset in [("Strong (>1.0)", strong_aligned),
+                                  ("Medium (0.3-1.0)", medium_aligned),
+                                  ("Weak (0-0.3)", weak_aligned),
+                                  ("Misaligned (≤0)", misaligned)]:
+                if len(subset) > 0:
+                    m5 = subset['markout_5s_per_share'].mean() * 100 if 'markout_5s_per_share' in subset.columns else 0
+                    m15 = subset['markout_15s_per_share'].mean() * 100 if 'markout_15s_per_share' in subset.columns else 0
+                    print(f"  {name:<25} {len(subset):<10} {m5:>+.2f}¢          {m15:>+.2f}¢")
+                else:
+                    print(f"  {name:<25} {'0':<10} {'N/A':<15} {'N/A':<15}")
+
+            # Also by absolute imbalance magnitude (regardless of direction)
+            print(f"\n  By absolute imbalance magnitude:")
+            print(f"  {'|Imbalance|':<25} {'Fills':<10} {'5s ¢/share':<15} {'15s ¢/share':<15}")
+            print(f"  {'-'*25} {'-'*10} {'-'*15} {'-'*15}")
+
+            agg_with_signals['abs_imb'] = abs(agg_with_signals['book_imbalance'])
+
+            very_strong_imb = agg_with_signals[agg_with_signals['abs_imb'] > 0.6]
+            strong_imb = agg_with_signals[(agg_with_signals['abs_imb'] > 0.4) & (agg_with_signals['abs_imb'] <= 0.6)]
+            medium_imb = agg_with_signals[(agg_with_signals['abs_imb'] > 0.2) & (agg_with_signals['abs_imb'] <= 0.4)]
+            weak_imb = agg_with_signals[agg_with_signals['abs_imb'] <= 0.2]
+
+            for name, subset in [("Very strong (>0.6)", very_strong_imb),
+                                  ("Strong (0.4-0.6)", strong_imb),
+                                  ("Medium (0.2-0.4)", medium_imb),
+                                  ("Weak (≤0.2)", weak_imb)]:
+                if len(subset) > 0:
+                    m5 = subset['markout_5s_per_share'].mean() * 100 if 'markout_5s_per_share' in subset.columns else 0
+                    m15 = subset['markout_15s_per_share'].mean() * 100 if 'markout_15s_per_share' in subset.columns else 0
+                    print(f"  {name:<25} {len(subset):<10} {m5:>+.2f}¢          {m15:>+.2f}¢")
+                else:
+                    print(f"  {name:<25} {'0':<10} {'N/A':<15} {'N/A':<15}")
+
+            # Recommendation based on data
+            if len(strong_aligned) >= 5 and len(weak_aligned) >= 5:
+                strong_avg = strong_aligned['markout_5s_per_share'].mean()
+                weak_avg = weak_aligned['markout_5s_per_share'].mean()
+                if strong_avg > weak_avg + 0.005:
+                    print(f"\n  💡 Strong alignment ({strong_avg*100:+.2f}¢) >> weak alignment ({weak_avg*100:+.2f}¢)")
+                    print(f"     → Consider requiring alignment_strength > 0.3 for aggressive mode")
+        else:
+            print(f"  ⚠️  z_score column not available for alignment analysis")
 
 
 def summary_and_diagnosis(df):
