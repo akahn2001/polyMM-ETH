@@ -36,17 +36,17 @@ def price_level_analysis(df):
     print("PRICE LEVEL ANALYSIS")
     print("=" * 80)
 
-    if 'price' not in df.columns:
-        print("  Error: 'price' column not found in data")
-        return
+    if 'fill_yes' not in df.columns:
+        print("  Error: 'fill_yes' column not found in data")
+        return df
 
     if 'markout_5s_per_share' not in df.columns:
         print("  Error: 'markout_5s_per_share' column not found in data")
-        return
+        return df
 
     # Create price buckets (10 cent increments)
     df = df.copy()
-    df['price_bucket'] = pd.cut(df['price'],
+    df['fill_yes_bucket'] = pd.cut(df['fill_yes'],
                                  bins=[0, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00],
                                  labels=['0-10¢', '10-20¢', '20-30¢', '30-40¢', '40-50¢',
                                         '50-60¢', '60-70¢', '70-80¢', '80-90¢', '90-100¢'],
@@ -56,8 +56,8 @@ def price_level_analysis(df):
     print(f"{'Price':<12} {'Fills':<8} {'Shares':<10} {'5s ¢/share':<14} {'15s ¢/share':<14} {'$ PNL':<12}")
     print(f"{'-'*12} {'-'*8} {'-'*10} {'-'*14} {'-'*14} {'-'*12}")
 
-    for bucket in df['price_bucket'].cat.categories:
-        subset = df[df['price_bucket'] == bucket]
+    for bucket in df['fill_yes_bucket'].cat.categories:
+        subset = df[df['fill_yes_bucket'] == bucket]
         if len(subset) > 0:
             shares = subset['qty'].sum() if 'qty' in subset.columns else len(subset)
             m5 = subset['markout_5s_per_share'].mean() * 100
@@ -80,9 +80,13 @@ def direction_by_price_analysis(df):
         print("  Error: 'dir_yes' column not found")
         return
 
-    if 'price_bucket' not in df.columns:
+    if 'fill_yes' not in df.columns:
+        print("  Error: 'fill_yes' column not found")
+        return
+
+    if 'fill_yes_bucket' not in df.columns:
         df = df.copy()
-        df['price_bucket'] = pd.cut(df['price'],
+        df['fill_yes_bucket'] = pd.cut(df['fill_yes'],
                                      bins=[0, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00],
                                      labels=['0-10¢', '10-20¢', '20-30¢', '30-40¢', '40-50¢',
                                             '50-60¢', '60-70¢', '70-80¢', '80-90¢', '90-100¢'],
@@ -95,9 +99,9 @@ def direction_by_price_analysis(df):
     print(f"{'Level':<12} {'Fills':<8} {'5s ¢/sh':<10} {'$ PNL':<12} {'Fills':<8} {'5s ¢/sh':<10} {'$ PNL':<12}")
     print(f"{'-'*12} {'-'*8} {'-'*10} {'-'*12} {'-'*8} {'-'*10} {'-'*12}")
 
-    for bucket in df['price_bucket'].cat.categories:
-        buy_sub = buy_yes[buy_yes['price_bucket'] == bucket]
-        sell_sub = sell_yes[sell_yes['price_bucket'] == bucket]
+    for bucket in df['fill_yes_bucket'].cat.categories:
+        buy_sub = buy_yes[buy_yes['fill_yes_bucket'] == bucket]
+        sell_sub = sell_yes[sell_yes['fill_yes_bucket'] == bucket]
 
         buy_fills = len(buy_sub)
         buy_m5 = buy_sub['markout_5s_per_share'].mean() * 100 if buy_fills > 0 else 0
@@ -119,12 +123,16 @@ def tail_analysis(df):
     print("TAIL ANALYSIS (Extreme Prices)")
     print("=" * 80)
 
+    if 'fill_yes' not in df.columns:
+        print("  Error: 'fill_yes' column not found")
+        return
+
     df = df.copy()
 
     # Define tails
-    low_tail = df[df['price'] <= 0.15]  # 15¢ or less
-    high_tail = df[df['price'] >= 0.85]  # 85¢ or more
-    middle = df[(df['price'] > 0.15) & (df['price'] < 0.85)]
+    low_tail = df[df['fill_yes'] <= 0.15]  # 15¢ or less
+    high_tail = df[df['fill_yes'] >= 0.85]  # 85¢ or more
+    middle = df[(df['fill_yes'] > 0.15) & (df['fill_yes'] < 0.85)]
 
     print(f"\nFill distribution:")
     print(f"  Low tail (≤15¢):    {len(low_tail):>6} fills ({len(low_tail)/len(df)*100:.1f}%)")
@@ -209,8 +217,12 @@ def extreme_tail_analysis(df):
     print("EXTREME TAIL ANALYSIS (≤10¢ and ≥90¢)")
     print("=" * 80)
 
-    very_low = df[df['price'] <= 0.10]
-    very_high = df[df['price'] >= 0.90]
+    if 'fill_yes' not in df.columns:
+        print("  Error: 'fill_yes' column not found")
+        return
+
+    very_low = df[df['fill_yes'] <= 0.10]
+    very_high = df[df['fill_yes'] >= 0.90]
 
     print(f"\nExtreme low (≤10¢): {len(very_low)} fills")
     if len(very_low) > 0:
@@ -238,8 +250,8 @@ def spread_by_price_analysis(df):
         return
 
     df = df.copy()
-    if 'price_bucket' not in df.columns:
-        df['price_bucket'] = pd.cut(df['price'],
+    if 'fill_yes_bucket' not in df.columns:
+        df['fill_yes_bucket'] = pd.cut(df['fill_yes'],
                                      bins=[0, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00],
                                      labels=['0-10¢', '10-20¢', '20-30¢', '30-40¢', '40-50¢',
                                             '50-60¢', '60-70¢', '70-80¢', '80-90¢', '90-100¢'],
@@ -248,8 +260,8 @@ def spread_by_price_analysis(df):
     print(f"\n{'Price Level':<12} {'Avg Spread':<12} {'Fills':<10}")
     print(f"{'-'*12} {'-'*12} {'-'*10}")
 
-    for bucket in df['price_bucket'].cat.categories:
-        subset = df[df['price_bucket'] == bucket]
+    for bucket in df['fill_yes_bucket'].cat.categories:
+        subset = df[df['fill_yes_bucket'] == bucket]
         if len(subset) > 0:
             avg_spread = subset['spread'].mean() * 100
             print(f"{bucket:<12} {avg_spread:.2f}¢        {len(subset):<10}")
@@ -261,9 +273,13 @@ def summary_and_recommendations(df):
     print("SUMMARY & RECOMMENDATIONS")
     print("=" * 80)
 
-    low_tail = df[df['price'] <= 0.15]
-    high_tail = df[df['price'] >= 0.85]
-    middle = df[(df['price'] > 0.15) & (df['price'] < 0.85)]
+    if 'fill_yes' not in df.columns:
+        print("  Error: 'fill_yes' column not found")
+        return
+
+    low_tail = df[df['fill_yes'] <= 0.15]
+    high_tail = df[df['fill_yes'] >= 0.85]
+    middle = df[(df['fill_yes'] > 0.15) & (df['fill_yes'] < 0.85)]
 
     findings = []
 
