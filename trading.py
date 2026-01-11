@@ -1318,11 +1318,12 @@ async def _perform_trade_locked(market_id: str):
                         print(f"[MM] Z-skew: raw={z_skew_raw:.4f}, conf={z_confidence:.2f}, adjusted={z_skew_adjusted:.4f}, market_priced={market_implied_move:.4f}, residual={z_skew_residual:.4f}")
 
     # Aggressive mode: increase cap when high conviction z-score signal
-    # Conditions: |z_score| > threshold, |z_skew_residual| > threshold (edge remaining after market moved)
+    # Conditions: |z_score| > threshold, |z_skew_residual| > threshold, signals aligned
     aggressive_mode = (
         AGGRESSIVE_MODE_ENABLED and
         abs(z_score) > AGGRESSIVE_Z_THRESHOLD and
-        abs(z_skew_residual) > AGGRESSIVE_ZSKEW_THRESHOLD
+        abs(z_skew_residual) > AGGRESSIVE_ZSKEW_THRESHOLD and
+        z_score * book_imbalance > 0  # Require z-score and book imbalance alignment
     )
 
     # Cap z_skew and z_skew_residual - use higher cap in aggressive mode

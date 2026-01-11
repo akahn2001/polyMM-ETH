@@ -1765,8 +1765,10 @@ def main():
 
         print(f"\nMarket activity:")
         print(f"  Total fills: {len(df)}")
+        print(f"  Total shares: {df['qty'].sum():.0f}")
         print(f"  Unique 15-min markets traded: {unique_markets}")
         print(f"  Average fills per market: {len(df)/unique_markets:.1f}")
+        print(f"  Average shares per market: {df['qty'].sum()/unique_markets:.1f}")
     else:
         print(f"\nTotal fills: {len(df)}")
         print("  (No timestamp column - cannot calculate unique markets)")
