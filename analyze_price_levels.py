@@ -1,13 +1,11 @@
 """
 Price Level Analysis for Polymarket MM
 
-Analyzes whether prices at different levels (especially tails near 0 or 100)
-are systematically mispriced. Tests the "favorite-longshot bias" hypothesis.
+Analyzes whether longshots vs favorites are systematically mispriced.
+Tests the "favorite-longshot bias" hypothesis.
 
 Usage:
     python analyze_price_levels.py [path_to_fills.csv]
-
-If no path provided, uses detailed_fills.csv in current directory.
 """
 
 import pandas as pd
@@ -40,7 +38,7 @@ def load_fills(filepath="markouts/detailed_fills.csv"):
             print(f"Available columns: {list(df.columns)}")
             sys.exit(1)
 
-        print(f"Calculated per-share markouts")
+        print(f"Calculated per-share markouts\n")
         return df
 
     except FileNotFoundError:
@@ -51,330 +49,240 @@ def load_fills(filepath="markouts/detailed_fills.csv"):
         sys.exit(1)
 
 
-def price_level_analysis(df):
-    """Analyze markouts by price level buckets."""
-    print("\n" + "=" * 80)
-    print("PRICE LEVEL ANALYSIS")
-    print("=" * 80)
+def compute_implied_prob(df):
+    """
+    Compute the implied probability of the side we're buying.
 
-    if 'fill_yes' not in df.columns:
-        print("  Error: 'fill_yes' column not found in data")
-        return df
-
-    if 'markout_5s_per_share' not in df.columns:
-        print("  Error: 'markout_5s_per_share' column not found in data")
-        return df
-
-    # Create price buckets (10 cent increments)
+    - If we buy YES at 90¢ → we're buying a 90% favorite
+    - If we sell YES at 90¢ → we're buying NO at 10¢ → buying a 10% longshot
+    - If we buy YES at 10¢ → we're buying a 10% longshot
+    - If we sell YES at 10¢ → we're buying NO at 90¢ → buying a 90% favorite
+    """
     df = df.copy()
-    df['fill_yes_bucket'] = pd.cut(df['fill_yes'],
-                                 bins=[0, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00],
-                                 labels=['0-10¢', '10-20¢', '20-30¢', '30-40¢', '40-50¢',
-                                        '50-60¢', '60-70¢', '70-80¢', '80-90¢', '90-100¢'],
-                                 include_lowest=True)
 
-    print(f"\nOverall by price level (all fills):")
-    print(f"{'Price':<12} {'Fills':<8} {'Shares':<10} {'5s ¢/share':<14} {'15s ¢/share':<14} {'$ PNL':<12}")
-    print(f"{'-'*12} {'-'*8} {'-'*10} {'-'*14} {'-'*14} {'-'*12}")
-
-    for bucket in df['fill_yes_bucket'].cat.categories:
-        subset = df[df['fill_yes_bucket'] == bucket]
-        if len(subset) > 0:
-            shares = subset['qty'].sum() if 'qty' in subset.columns else len(subset)
-            m5 = subset['markout_5s_per_share'].mean() * 100
-            m15 = subset['markout_15s_per_share'].mean() * 100 if 'markout_15s_per_share' in subset.columns else 0
-            pnl = subset['markout_5s'].sum() if 'markout_5s' in subset.columns else 0
-            print(f"{bucket:<12} {len(subset):<8} {shares:<10.0f} {m5:>+.2f}¢         {m15:>+.2f}¢         ${pnl:>+.2f}")
-        else:
-            print(f"{bucket:<12} {'0':<8} {'-':<10} {'-':<14} {'-':<14} {'-':<12}")
+    # Implied probability of the side we're taking
+    # dir_yes = 1 means we bought YES, so our implied prob is the YES price
+    # dir_yes = -1 means we sold YES (bought NO), so our implied prob is 1 - YES price
+    df['implied_prob'] = np.where(
+        df['dir_yes'] == 1,
+        df['fill_yes'],           # Bought YES: our side's prob = YES price
+        1 - df['fill_yes']        # Sold YES (bought NO): our side's prob = NO price
+    )
 
     return df
 
 
-def direction_by_price_analysis(df):
-    """Analyze markouts by price level AND direction (buy vs sell YES)."""
-    print("\n" + "=" * 80)
-    print("PRICE LEVEL BY DIRECTION (Buy YES vs Sell YES)")
+def longshot_favorite_analysis(df):
+    """Main analysis: markouts by implied probability of side we're buying."""
     print("=" * 80)
-
-    if 'dir_yes' not in df.columns:
-        print("  Error: 'dir_yes' column not found")
-        return
-
-    if 'fill_yes' not in df.columns:
-        print("  Error: 'fill_yes' column not found")
-        return
-
-    if 'fill_yes_bucket' not in df.columns:
-        df = df.copy()
-        df['fill_yes_bucket'] = pd.cut(df['fill_yes'],
-                                     bins=[0, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00],
-                                     labels=['0-10¢', '10-20¢', '20-30¢', '30-40¢', '40-50¢',
-                                            '50-60¢', '60-70¢', '70-80¢', '80-90¢', '90-100¢'],
-                                     include_lowest=True)
-
-    buy_yes = df[df['dir_yes'] == 1]
-    sell_yes = df[df['dir_yes'] == -1]
-
-    print(f"\n{'Price':<12} {'--- Buy YES ---':<30} {'--- Sell YES ---':<30}")
-    print(f"{'Level':<12} {'Fills':<8} {'5s ¢/sh':<10} {'$ PNL':<12} {'Fills':<8} {'5s ¢/sh':<10} {'$ PNL':<12}")
-    print(f"{'-'*12} {'-'*8} {'-'*10} {'-'*12} {'-'*8} {'-'*10} {'-'*12}")
-
-    for bucket in df['fill_yes_bucket'].cat.categories:
-        buy_sub = buy_yes[buy_yes['fill_yes_bucket'] == bucket]
-        sell_sub = sell_yes[sell_yes['fill_yes_bucket'] == bucket]
-
-        buy_fills = len(buy_sub)
-        buy_m5 = buy_sub['markout_5s_per_share'].mean() * 100 if buy_fills > 0 else 0
-        buy_pnl = buy_sub['markout_5s'].sum() if buy_fills > 0 and 'markout_5s' in buy_sub.columns else 0
-
-        sell_fills = len(sell_sub)
-        sell_m5 = sell_sub['markout_5s_per_share'].mean() * 100 if sell_fills > 0 else 0
-        sell_pnl = sell_sub['markout_5s'].sum() if sell_fills > 0 and 'markout_5s' in sell_sub.columns else 0
-
-        buy_str = f"{buy_fills:<8} {buy_m5:>+.2f}¢     ${buy_pnl:>+.2f}" if buy_fills > 0 else f"{'0':<8} {'-':<10} {'-':<12}"
-        sell_str = f"{sell_fills:<8} {sell_m5:>+.2f}¢     ${sell_pnl:>+.2f}" if sell_fills > 0 else f"{'0':<8} {'-':<10} {'-':<12}"
-
-        print(f"{bucket:<12} {buy_str:<30} {sell_str:<30}")
-
-
-def tail_analysis(df):
-    """Focused analysis on tail prices (near 0 or 100)."""
-    print("\n" + "=" * 80)
-    print("TAIL ANALYSIS (Extreme Prices)")
+    print("LONGSHOT VS FAVORITE ANALYSIS")
     print("=" * 80)
+    print("\nFor each fill, we compute the implied probability of the side we're buying:")
+    print("  - Buy YES at 80¢ → buying 80% favorite")
+    print("  - Sell YES at 80¢ → buying 20% longshot (the NO side)")
+    print()
 
-    if 'fill_yes' not in df.columns:
-        print("  Error: 'fill_yes' column not found")
-        return
+    df = compute_implied_prob(df)
 
-    df = df.copy()
+    # Define buckets by implied probability
+    buckets = [
+        ("Extreme longshot (0-15%)", df[df['implied_prob'] <= 0.15]),
+        ("Longshot (15-30%)", df[(df['implied_prob'] > 0.15) & (df['implied_prob'] <= 0.30)]),
+        ("Slight underdog (30-45%)", df[(df['implied_prob'] > 0.30) & (df['implied_prob'] <= 0.45)]),
+        ("Coin flip (45-55%)", df[(df['implied_prob'] > 0.45) & (df['implied_prob'] <= 0.55)]),
+        ("Slight favorite (55-70%)", df[(df['implied_prob'] > 0.55) & (df['implied_prob'] <= 0.70)]),
+        ("Favorite (70-85%)", df[(df['implied_prob'] > 0.70) & (df['implied_prob'] <= 0.85)]),
+        ("Heavy favorite (85-100%)", df[df['implied_prob'] > 0.85]),
+    ]
 
-    # Define tails
-    low_tail = df[df['fill_yes'] <= 0.15]  # 15¢ or less
-    high_tail = df[df['fill_yes'] >= 0.85]  # 85¢ or more
-    middle = df[(df['fill_yes'] > 0.15) & (df['fill_yes'] < 0.85)]
+    print(f"{'Category':<28} {'Fills':<8} {'Shares':<10} {'5s ¢/share':<14} {'15s ¢/share':<14} {'$ PNL':<10}")
+    print(f"{'-'*28} {'-'*8} {'-'*10} {'-'*14} {'-'*14} {'-'*10}")
 
-    print(f"\nFill distribution:")
-    print(f"  Low tail (≤15¢):    {len(low_tail):>6} fills ({len(low_tail)/len(df)*100:.1f}%)")
-    print(f"  Middle (15-85¢):    {len(middle):>6} fills ({len(middle)/len(df)*100:.1f}%)")
-    print(f"  High tail (≥85¢):   {len(high_tail):>6} fills ({len(high_tail)/len(df)*100:.1f}%)")
-
-    print(f"\n5s Markout by region:")
-    for name, subset in [("Low tail ≤15¢", low_tail), ("Middle 15-85¢", middle), ("High tail ≥85¢", high_tail)]:
+    results = []
+    for name, subset in buckets:
         if len(subset) > 0:
+            shares = subset['qty'].sum()
             m5 = subset['markout_5s_per_share'].mean() * 100
             m15 = subset['markout_15s_per_share'].mean() * 100 if 'markout_15s_per_share' in subset.columns else 0
-            pnl = subset['markout_5s'].sum() if 'markout_5s' in subset.columns else 0
-            print(f"  {name:<18} {len(subset):>5} fills, {m5:>+.2f}¢/share (5s), {m15:>+.2f}¢/share (15s), ${pnl:>+.2f} PNL")
+            pnl = subset['markout_5s'].sum()
+            print(f"{name:<28} {len(subset):<8} {shares:<10.0f} {m5:>+.2f}¢         {m15:>+.2f}¢         ${pnl:>+.2f}")
+            results.append((name, len(subset), m5, subset['markout_5s_per_share']))
+        else:
+            print(f"{name:<28} {'0':<8} {'-':<10} {'-':<14} {'-':<14} {'-':<10}")
 
-    # Direction split for tails
-    print(f"\nTail fills by direction:")
-    print(f"  {'Region':<20} {'Buy YES':<25} {'Sell YES':<25}")
-    print(f"  {'-'*20} {'-'*25} {'-'*25}")
-
-    for name, subset in [("Low tail (≤15¢)", low_tail), ("High tail (≥85¢)", high_tail)]:
-        if len(subset) > 0:
-            buy = subset[subset['dir_yes'] == 1]
-            sell = subset[subset['dir_yes'] == -1]
-
-            buy_str = f"{len(buy)} fills, {buy['markout_5s_per_share'].mean()*100:>+.2f}¢" if len(buy) > 0 else "0 fills"
-            sell_str = f"{len(sell)} fills, {sell['markout_5s_per_share'].mean()*100:>+.2f}¢" if len(sell) > 0 else "0 fills"
-
-            print(f"  {name:<20} {buy_str:<25} {sell_str:<25}")
-
-    # Test for systematic mispricing
-    # Classic "favorite-longshot bias": longshots (low probability) are OVERPRICED
-    # At 85¢ YES: the longshot is NO (15¢) - if overpriced, buying YES has edge
-    # At 15¢ YES: the longshot is YES - if overpriced, selling YES has edge
-    print(f"\nFavorite-Longshot Bias Test:")
-
-    # At high YES prices (≥85¢), the longshot is NO
-    # If tails overpriced → NO overpriced → YES underpriced → BUYING YES profitable
-    high_tail_buys = high_tail[high_tail['dir_yes'] == 1]
-    if len(high_tail_buys) >= MIN_SAMPLES:
-        avg = high_tail_buys['markout_5s_per_share'].mean()
-        t_stat, p_val = stats.ttest_1samp(high_tail_buys['markout_5s_per_share'], 0)
-        sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else ""
-        print(f"  Buying YES at ≥85¢:  {avg*100:+.2f}¢/share, n={len(high_tail_buys)}, p={p_val:.4f} {sig}")
-        if avg > 0.005 and p_val < 0.05:
-            print(f"    → NO tail (longshot) appears OVERPRICED - buying YES is profitable")
-        elif avg < -0.005 and p_val < 0.05:
-            print(f"    → YES appears OVERPRICED at high prices - avoid buying")
-
-    high_tail_sells = high_tail[high_tail['dir_yes'] == -1]
-    if len(high_tail_sells) >= MIN_SAMPLES:
-        avg = high_tail_sells['markout_5s_per_share'].mean()
-        t_stat, p_val = stats.ttest_1samp(high_tail_sells['markout_5s_per_share'], 0)
-        sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else ""
-        print(f"  Selling YES at ≥85¢: {avg*100:+.2f}¢/share, n={len(high_tail_sells)}, p={p_val:.4f} {sig}")
-        if avg > 0.005 and p_val < 0.05:
-            print(f"    → YES appears OVERPRICED at high prices - selling has edge")
-
-    # At low YES prices (≤15¢), the longshot is YES
-    # If tails overpriced → YES overpriced → SELLING YES profitable
-    low_tail_sells = low_tail[low_tail['dir_yes'] == -1]
-    if len(low_tail_sells) >= MIN_SAMPLES:
-        avg = low_tail_sells['markout_5s_per_share'].mean()
-        t_stat, p_val = stats.ttest_1samp(low_tail_sells['markout_5s_per_share'], 0)
-        sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else ""
-        print(f"  Selling YES at ≤15¢: {avg*100:+.2f}¢/share, n={len(low_tail_sells)}, p={p_val:.4f} {sig}")
-        if avg > 0.005 and p_val < 0.05:
-            print(f"    → YES tail (longshot) appears OVERPRICED - selling has edge")
-
-    low_tail_buys = low_tail[low_tail['dir_yes'] == 1]
-    if len(low_tail_buys) >= MIN_SAMPLES:
-        avg = low_tail_buys['markout_5s_per_share'].mean()
-        t_stat, p_val = stats.ttest_1samp(low_tail_buys['markout_5s_per_share'], 0)
-        sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else ""
-        print(f"  Buying YES at ≤15¢:  {avg*100:+.2f}¢/share, n={len(low_tail_buys)}, p={p_val:.4f} {sig}")
-        if avg > 0.005 and p_val < 0.05:
-            print(f"    → YES tail appears UNDERPRICED - buying has edge")
+    return df, results
 
 
-def extreme_tail_analysis(df):
-    """Even more extreme tails (≤10¢ and ≥90¢)."""
+def longshot_vs_favorite_comparison(df, results):
+    """Compare longshots (< 30%) vs favorites (> 70%)."""
     print("\n" + "=" * 80)
-    print("EXTREME TAIL ANALYSIS (≤10¢ and ≥90¢)")
+    print("LONGSHOT VS FAVORITE COMPARISON")
     print("=" * 80)
 
-    if 'fill_yes' not in df.columns:
-        print("  Error: 'fill_yes' column not found")
-        return
+    longshots = df[df['implied_prob'] <= 0.30]
+    favorites = df[df['implied_prob'] >= 0.70]
+    middle = df[(df['implied_prob'] > 0.30) & (df['implied_prob'] < 0.70)]
 
-    very_low = df[df['fill_yes'] <= 0.10]
-    very_high = df[df['fill_yes'] >= 0.90]
+    print(f"\nAggregate comparison:")
+    print(f"  {'Category':<20} {'Fills':<8} {'5s ¢/share':<14} {'$ PNL':<12}")
+    print(f"  {'-'*20} {'-'*8} {'-'*14} {'-'*12}")
 
-    print(f"\nExtreme low (≤10¢): {len(very_low)} fills")
-    if len(very_low) > 0:
-        buy = very_low[very_low['dir_yes'] == 1]
-        sell = very_low[very_low['dir_yes'] == -1]
-        print(f"  Buy YES:  {len(buy):>4} fills, {buy['markout_5s_per_share'].mean()*100:>+.2f}¢/share" if len(buy) > 0 else "  Buy YES:  0 fills")
-        print(f"  Sell YES: {len(sell):>4} fills, {sell['markout_5s_per_share'].mean()*100:>+.2f}¢/share" if len(sell) > 0 else "  Sell YES: 0 fills")
+    for name, subset in [("Longshots (<30%)", longshots),
+                          ("Middle (30-70%)", middle),
+                          ("Favorites (>70%)", favorites)]:
+        if len(subset) > 0:
+            m5 = subset['markout_5s_per_share'].mean() * 100
+            pnl = subset['markout_5s'].sum()
+            print(f"  {name:<20} {len(subset):<8} {m5:>+.2f}¢         ${pnl:>+.2f}")
 
-    print(f"\nExtreme high (≥90¢): {len(very_high)} fills")
-    if len(very_high) > 0:
-        buy = very_high[very_high['dir_yes'] == 1]
-        sell = very_high[very_high['dir_yes'] == -1]
-        print(f"  Buy YES:  {len(buy):>4} fills, {buy['markout_5s_per_share'].mean()*100:>+.2f}¢/share" if len(buy) > 0 else "  Buy YES:  0 fills")
-        print(f"  Sell YES: {len(sell):>4} fills, {sell['markout_5s_per_share'].mean()*100:>+.2f}¢/share" if len(sell) > 0 else "  Sell YES: 0 fills")
+    # Statistical test
+    if len(longshots) >= MIN_SAMPLES and len(favorites) >= MIN_SAMPLES:
+        t_stat, p_val = stats.ttest_ind(longshots['markout_5s_per_share'],
+                                         favorites['markout_5s_per_share'])
+        sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else ""
+
+        long_avg = longshots['markout_5s_per_share'].mean() * 100
+        fav_avg = favorites['markout_5s_per_share'].mean() * 100
+
+        print(f"\n  Statistical test (longshots vs favorites):")
+        print(f"    Longshots: {long_avg:+.2f}¢, Favorites: {fav_avg:+.2f}¢")
+        print(f"    Difference: {long_avg - fav_avg:+.2f}¢, p={p_val:.4f} {sig}")
+
+        if long_avg < fav_avg - 0.5 and p_val < 0.05:
+            print(f"\n  --> LONGSHOTS UNDERPERFORM: Classic favorite-longshot bias detected!")
+            print(f"      Longshots are overpriced. Bias toward selling longshots / buying favorites.")
+        elif long_avg > fav_avg + 0.5 and p_val < 0.05:
+            print(f"\n  --> FAVORITES UNDERPERFORM: Reverse bias detected!")
+            print(f"      Favorites are overpriced. Bias toward buying longshots / selling favorites.")
+        else:
+            print(f"\n  --> No significant favorite-longshot bias detected.")
 
 
-def spread_by_price_analysis(df):
-    """Analyze if spreads are wider at tails (less liquidity)."""
+def continuous_probability_analysis(df):
+    """Analyze the continuous relationship between implied prob and markout."""
     print("\n" + "=" * 80)
-    print("SPREAD BY PRICE LEVEL")
+    print("CONTINUOUS PROBABILITY ANALYSIS")
     print("=" * 80)
 
-    if 'spread' not in df.columns:
-        print("  'spread' column not in data - skipping")
+    df = compute_implied_prob(df)
+
+    # Correlation between implied probability and markout
+    corr = df['implied_prob'].corr(df['markout_5s_per_share'])
+    print(f"\nCorrelation (implied_prob vs markout): {corr:.4f}")
+
+    if corr > 0.05:
+        print("  → Positive correlation: higher probability bets have better markouts")
+        print("  → Suggests LONGSHOTS are OVERPRICED (buying favorites is better)")
+    elif corr < -0.05:
+        print("  → Negative correlation: lower probability bets have better markouts")
+        print("  → Suggests FAVORITES are OVERPRICED (buying longshots is better)")
+    else:
+        print("  → No significant correlation between probability and markout")
+
+    # Finer-grained buckets (10% increments)
+    print(f"\nFine-grained analysis (10% buckets):")
+    print(f"  {'Implied Prob':<15} {'Fills':<8} {'5s ¢/share':<14}")
+    print(f"  {'-'*15} {'-'*8} {'-'*14}")
+
+    for low in range(0, 100, 10):
+        high = low + 10
+        subset = df[(df['implied_prob'] > low/100) & (df['implied_prob'] <= high/100)]
+        if len(subset) >= 5:
+            m5 = subset['markout_5s_per_share'].mean() * 100
+            print(f"  {low:>3}-{high:<3}%         {len(subset):<8} {m5:>+.2f}¢")
+        elif len(subset) > 0:
+            print(f"  {low:>3}-{high:<3}%         {len(subset):<8} (too few)")
+        else:
+            print(f"  {low:>3}-{high:<3}%         {'0':<8} -")
+
+
+def extreme_longshot_analysis(df):
+    """Deep dive on extreme longshots (< 15%)."""
+    print("\n" + "=" * 80)
+    print("EXTREME LONGSHOT ANALYSIS (<15% implied probability)")
+    print("=" * 80)
+
+    df = compute_implied_prob(df)
+    extreme = df[df['implied_prob'] <= 0.15]
+
+    if len(extreme) < 5:
+        print(f"\n  Only {len(extreme)} fills at extreme longshot prices - insufficient data")
         return
 
-    df = df.copy()
-    if 'fill_yes_bucket' not in df.columns:
-        df['fill_yes_bucket'] = pd.cut(df['fill_yes'],
-                                     bins=[0, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00],
-                                     labels=['0-10¢', '10-20¢', '20-30¢', '30-40¢', '40-50¢',
-                                            '50-60¢', '60-70¢', '70-80¢', '80-90¢', '90-100¢'],
-                                     include_lowest=True)
+    print(f"\n  Total extreme longshot fills: {len(extreme)}")
+    print(f"  Avg markout: {extreme['markout_5s_per_share'].mean()*100:+.2f}¢/share")
+    print(f"  Total PNL: ${extreme['markout_5s'].sum():+.2f}")
 
-    print(f"\n{'Price Level':<12} {'Avg Spread':<12} {'Fills':<10}")
-    print(f"{'-'*12} {'-'*12} {'-'*10}")
+    # Break down further
+    print(f"\n  {'Probability':<15} {'Fills':<8} {'5s ¢/share':<14}")
+    print(f"  {'-'*15} {'-'*8} {'-'*14}")
 
-    for bucket in df['fill_yes_bucket'].cat.categories:
-        subset = df[df['fill_yes_bucket'] == bucket]
+    for low, high in [(0, 5), (5, 10), (10, 15)]:
+        subset = extreme[(extreme['implied_prob'] > low/100) & (extreme['implied_prob'] <= high/100)]
         if len(subset) > 0:
-            avg_spread = subset['spread'].mean() * 100
-            print(f"{bucket:<12} {avg_spread:.2f}¢        {len(subset):<10}")
+            m5 = subset['markout_5s_per_share'].mean() * 100
+            print(f"  {low:>3}-{high:<3}%         {len(subset):<8} {m5:>+.2f}¢")
+
+    # Test if significantly different from zero
+    if len(extreme) >= MIN_SAMPLES:
+        t_stat, p_val = stats.ttest_1samp(extreme['markout_5s_per_share'], 0)
+        sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else ""
+        avg = extreme['markout_5s_per_share'].mean() * 100
+        print(f"\n  t-test vs zero: {avg:+.2f}¢, p={p_val:.4f} {sig}")
+
+        if avg < -0.5 and p_val < 0.05:
+            print(f"  --> Extreme longshots are OVERPRICED - avoid buying them!")
+        elif avg > 0.5 and p_val < 0.05:
+            print(f"  --> Extreme longshots are UNDERPRICED - edge in buying them!")
 
 
-def summary_and_recommendations(df):
-    """Summarize findings and make recommendations."""
+def summary(df):
+    """Final summary and recommendations."""
     print("\n" + "=" * 80)
     print("SUMMARY & RECOMMENDATIONS")
     print("=" * 80)
 
-    if 'fill_yes' not in df.columns:
-        print("  Error: 'fill_yes' column not found")
-        return
+    df = compute_implied_prob(df)
 
-    low_tail = df[df['fill_yes'] <= 0.15]
-    high_tail = df[df['fill_yes'] >= 0.85]
-    middle = df[(df['fill_yes'] > 0.15) & (df['fill_yes'] < 0.85)]
+    longshots = df[df['implied_prob'] <= 0.30]
+    favorites = df[df['implied_prob'] >= 0.70]
 
     findings = []
 
-    # Compare tails to middle
-    if len(low_tail) >= MIN_SAMPLES and len(middle) >= MIN_SAMPLES:
-        low_avg = low_tail['markout_5s_per_share'].mean()
-        mid_avg = middle['markout_5s_per_share'].mean()
-        if low_avg < mid_avg - 0.005:
-            findings.append(f"Low tail (≤15¢) underperforms middle by {(mid_avg-low_avg)*100:.2f}¢/share")
-        elif low_avg > mid_avg + 0.005:
-            findings.append(f"Low tail (≤15¢) OUTperforms middle by {(low_avg-mid_avg)*100:.2f}¢/share")
+    if len(longshots) >= MIN_SAMPLES:
+        long_avg = longshots['markout_5s_per_share'].mean()
+        if long_avg < -0.005:
+            findings.append(f"Longshots (<30%) losing {abs(long_avg)*100:.2f}¢/share - they're OVERPRICED")
+        elif long_avg > 0.005:
+            findings.append(f"Longshots (<30%) making +{long_avg*100:.2f}¢/share - they're UNDERPRICED")
 
-    if len(high_tail) >= MIN_SAMPLES and len(middle) >= MIN_SAMPLES:
-        high_avg = high_tail['markout_5s_per_share'].mean()
-        mid_avg = middle['markout_5s_per_share'].mean()
-        if high_avg < mid_avg - 0.005:
-            findings.append(f"High tail (≥85¢) underperforms middle by {(mid_avg-high_avg)*100:.2f}¢/share")
-        elif high_avg > mid_avg + 0.005:
-            findings.append(f"High tail (≥85¢) OUTperforms middle by {(high_avg-mid_avg)*100:.2f}¢/share")
-
-    # Check for directional edge at tails
-    # At high prices: check both buy and sell
-    high_buys = high_tail[high_tail['dir_yes'] == 1]
-    high_sells = high_tail[high_tail['dir_yes'] == -1]
-    if len(high_buys) >= MIN_SAMPLES:
-        avg = high_buys['markout_5s_per_share'].mean()
-        if avg > 0.01:
-            findings.append(f"Buying YES at ≥85¢ has +{avg*100:.2f}¢ edge - NO tail overpriced, bias toward buying")
-        elif avg < -0.01:
-            findings.append(f"Buying YES at ≥85¢ loses {abs(avg)*100:.2f}¢ - YES overpriced at high prices, avoid buying")
-    if len(high_sells) >= MIN_SAMPLES:
-        avg = high_sells['markout_5s_per_share'].mean()
-        if avg > 0.01:
-            findings.append(f"Selling YES at ≥85¢ has +{avg*100:.2f}¢ edge - YES overpriced at high prices, bias toward selling")
-
-    # At low prices: check both buy and sell
-    low_buys = low_tail[low_tail['dir_yes'] == 1]
-    low_sells = low_tail[low_tail['dir_yes'] == -1]
-    if len(low_sells) >= MIN_SAMPLES:
-        avg = low_sells['markout_5s_per_share'].mean()
-        if avg > 0.01:
-            findings.append(f"Selling YES at ≤15¢ has +{avg*100:.2f}¢ edge - YES tail overpriced, bias toward selling")
-    if len(low_buys) >= MIN_SAMPLES:
-        avg = low_buys['markout_5s_per_share'].mean()
-        if avg > 0.01:
-            findings.append(f"Buying YES at ≤15¢ has +{avg*100:.2f}¢ edge - YES tail underpriced, bias toward buying")
-        elif avg < -0.01:
-            findings.append(f"Buying YES at ≤15¢ loses {abs(avg)*100:.2f}¢ - YES tail overpriced, avoid buying longshots")
+    if len(favorites) >= MIN_SAMPLES:
+        fav_avg = favorites['markout_5s_per_share'].mean()
+        if fav_avg < -0.005:
+            findings.append(f"Favorites (>70%) losing {abs(fav_avg)*100:.2f}¢/share - they're OVERPRICED")
+        elif fav_avg > 0.005:
+            findings.append(f"Favorites (>70%) making +{fav_avg*100:.2f}¢/share - they're UNDERPRICED")
 
     if findings:
         print("\nKey findings:")
         for f in findings:
             print(f"  - {f}")
     else:
-        print("\nNo significant tail mispricing detected with current data.")
-        print("Need more fills at extreme prices for reliable conclusions.")
+        print("\nNo significant mispricing detected at probability extremes.")
 
     print("\n" + "=" * 80)
+    print("Analysis complete!")
 
 
 def main():
-    # Load data
     filepath = sys.argv[1] if len(sys.argv) > 1 else "markouts/detailed_fills.csv"
     df = load_fills(filepath)
 
-    # Run analyses
-    df = price_level_analysis(df)
-    direction_by_price_analysis(df)
-    tail_analysis(df)
-    extreme_tail_analysis(df)
-    spread_by_price_analysis(df)
-    summary_and_recommendations(df)
-
-    print("Analysis complete!")
+    df, results = longshot_favorite_analysis(df)
+    longshot_vs_favorite_comparison(df, results)
+    continuous_probability_analysis(df)
+    extreme_longshot_analysis(df)
+    summary(df)
 
 
 if __name__ == "__main__":
