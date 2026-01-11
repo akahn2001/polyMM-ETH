@@ -19,7 +19,7 @@ from scipy import stats
 MIN_SAMPLES = 10
 
 
-def load_fills(filepath="detailed_fills.csv"):
+def load_fills(filepath="markouts/detailed_fills.csv"):
     """Load fills data from CSV."""
     try:
         df = pd.read_csv(filepath)
