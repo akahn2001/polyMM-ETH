@@ -72,6 +72,21 @@ def compute_implied_prob(df):
     return df
 
 
+def significance_test(data, null_value=0):
+    """Test if mean is significantly different from null_value. Returns (t_stat, p_val, sig_stars)."""
+    clean_data = data.dropna()
+    if len(clean_data) < MIN_SAMPLES:
+        return None, None, ""
+    try:
+        t_stat, p_val = stats.ttest_1samp(clean_data, null_value)
+        if np.isnan(p_val):
+            return None, None, ""
+        sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else ""
+        return t_stat, p_val, sig
+    except:
+        return None, None, ""
+
+
 def longshot_favorite_analysis(df):
     """Main analysis: markouts by implied probability of side we're buying."""
     print("=" * 80)
@@ -95,20 +110,24 @@ def longshot_favorite_analysis(df):
         ("Heavy favorite (85-100%)", df[df['implied_prob'] > 0.85]),
     ]
 
-    print(f"{'Category':<28} {'Fills':<8} {'Shares':<10} {'5s ¢/share':<14} {'15s ¢/share':<14} {'$ PNL':<10}")
-    print(f"{'-'*28} {'-'*8} {'-'*10} {'-'*14} {'-'*14} {'-'*10}")
+    print(f"{'Category':<28} {'Fills':<8} {'Shares':<10} {'5s ¢/share':<14} {'p-value':<12} {'$ PNL':<10}")
+    print(f"{'-'*28} {'-'*8} {'-'*10} {'-'*14} {'-'*12} {'-'*10}")
 
     results = []
     for name, subset in buckets:
         if len(subset) > 0:
             shares = subset['qty'].sum()
             m5 = subset['markout_5s_per_share'].mean() * 100
-            m15 = subset['markout_15s_per_share'].mean() * 100 if 'markout_15s_per_share' in subset.columns else 0
             pnl = subset['markout_5s'].sum()
-            print(f"{name:<28} {len(subset):<8} {shares:<10.0f} {m5:>+.2f}¢         {m15:>+.2f}¢         ${pnl:>+.2f}")
+
+            # Significance test vs zero
+            _, p_val, sig = significance_test(subset['markout_5s_per_share'], 0)
+            p_str = f"p={p_val:.3f}{sig}" if p_val is not None else "n/a"
+
+            print(f"{name:<28} {len(subset):<8} {shares:<10.0f} {m5:>+.2f}¢         {p_str:<12} ${pnl:>+.2f}")
             results.append((name, len(subset), m5, subset['markout_5s_per_share']))
         else:
-            print(f"{name:<28} {'0':<8} {'-':<10} {'-':<14} {'-':<14} {'-':<10}")
+            print(f"{name:<28} {'0':<8} {'-':<10} {'-':<14} {'-':<12} {'-':<10}")
 
     return df, results
 
@@ -124,8 +143,8 @@ def longshot_vs_favorite_comparison(df, results):
     middle = df[(df['implied_prob'] > 0.30) & (df['implied_prob'] < 0.70)]
 
     print(f"\nAggregate comparison:")
-    print(f"  {'Category':<20} {'Fills':<8} {'5s ¢/share':<14} {'$ PNL':<12}")
-    print(f"  {'-'*20} {'-'*8} {'-'*14} {'-'*12}")
+    print(f"  {'Category':<20} {'Fills':<8} {'5s ¢/share':<14} {'p-value':<12} {'$ PNL':<12}")
+    print(f"  {'-'*20} {'-'*8} {'-'*14} {'-'*12} {'-'*12}")
 
     for name, subset in [("Longshots (<30%)", longshots),
                           ("Middle (30-70%)", middle),
@@ -133,29 +152,39 @@ def longshot_vs_favorite_comparison(df, results):
         if len(subset) > 0:
             m5 = subset['markout_5s_per_share'].mean() * 100
             pnl = subset['markout_5s'].sum()
-            print(f"  {name:<20} {len(subset):<8} {m5:>+.2f}¢         ${pnl:>+.2f}")
+            _, p_val, sig = significance_test(subset['markout_5s_per_share'], 0)
+            p_str = f"p={p_val:.3f}{sig}" if p_val is not None else "n/a"
+            print(f"  {name:<20} {len(subset):<8} {m5:>+.2f}¢         {p_str:<12} ${pnl:>+.2f}")
 
-    # Statistical test
-    if len(longshots) >= MIN_SAMPLES and len(favorites) >= MIN_SAMPLES:
-        t_stat, p_val = stats.ttest_ind(longshots['markout_5s_per_share'],
-                                         favorites['markout_5s_per_share'])
-        sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else ""
+    # Statistical test comparing longshots vs favorites
+    long_clean = longshots['markout_5s_per_share'].dropna()
+    fav_clean = favorites['markout_5s_per_share'].dropna()
 
-        long_avg = longshots['markout_5s_per_share'].mean() * 100
-        fav_avg = favorites['markout_5s_per_share'].mean() * 100
+    if len(long_clean) >= MIN_SAMPLES and len(fav_clean) >= MIN_SAMPLES:
+        try:
+            t_stat, p_val = stats.ttest_ind(long_clean, fav_clean)
+            if np.isnan(p_val):
+                print(f"\n  Statistical test: Could not compute (data issue)")
+            else:
+                sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else ""
 
-        print(f"\n  Statistical test (longshots vs favorites):")
-        print(f"    Longshots: {long_avg:+.2f}¢, Favorites: {fav_avg:+.2f}¢")
-        print(f"    Difference: {long_avg - fav_avg:+.2f}¢, p={p_val:.4f} {sig}")
+                long_avg = long_clean.mean() * 100
+                fav_avg = fav_clean.mean() * 100
 
-        if long_avg < fav_avg - 0.5 and p_val < 0.05:
-            print(f"\n  --> LONGSHOTS UNDERPERFORM: Classic favorite-longshot bias detected!")
-            print(f"      Longshots are overpriced. Bias toward selling longshots / buying favorites.")
-        elif long_avg > fav_avg + 0.5 and p_val < 0.05:
-            print(f"\n  --> FAVORITES UNDERPERFORM: Reverse bias detected!")
-            print(f"      Favorites are overpriced. Bias toward buying longshots / selling favorites.")
-        else:
-            print(f"\n  --> No significant favorite-longshot bias detected.")
+                print(f"\n  Statistical test (longshots vs favorites):")
+                print(f"    Longshots: {long_avg:+.2f}¢, Favorites: {fav_avg:+.2f}¢")
+                print(f"    Difference: {long_avg - fav_avg:+.2f}¢, p={p_val:.4f} {sig}")
+
+                if long_avg < fav_avg - 0.5 and p_val < 0.05:
+                    print(f"\n  --> LONGSHOTS UNDERPERFORM: Classic favorite-longshot bias detected!")
+                    print(f"      Longshots are overpriced. Bias toward selling longshots / buying favorites.")
+                elif long_avg > fav_avg + 0.5 and p_val < 0.05:
+                    print(f"\n  --> FAVORITES UNDERPERFORM: Reverse bias detected!")
+                    print(f"      Favorites are overpriced. Bias toward buying longshots / selling favorites.")
+                else:
+                    print(f"\n  --> No significant favorite-longshot bias detected.")
+        except Exception as e:
+            print(f"\n  Statistical test error: {e}")
 
 
 def continuous_probability_analysis(df):
