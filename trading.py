@@ -34,10 +34,6 @@ from trading_config import (
 RECONCILE_INTERVAL = 0.50  # seconds (start here; tighten later if stable)
 RECONCILE_MAX_CANCEL_BATCH = 50  # keep batches mo  dest to avoid Cloudflare pain
 
-# IOC cooldown tracking (prevents spamming IOCs when z-score stays elevated)
-ioc_cooldown_lock = threading.Lock()  # Protects concurrent access to last_ioc_time
-last_ioc_time = {}  # {market_id: timestamp}
-
 # Per-market locks to prevent concurrent perform_trade() calls from double-counting capacity
 market_locks = {}  # {market_id: asyncio.Lock}
 market_locks_mutex = threading.Lock()  # Protects market_locks dict creation
@@ -169,38 +165,10 @@ def _extract_id(o):
         return o.get("id") or o.get("orderID") or o.get("order_id")
     return getattr(o, "id", None) or getattr(o, "order_id", None)
 
-IOC_STALE_THRESHOLD = 20.0  # seconds - clean up IOC deltas older than this
-
-def cleanup_stale_ioc_deltas():
-    """
-    Remove IOC order deltas that are older than IOC_STALE_THRESHOLD seconds.
-    This is a safety net in case websocket misses TRADE/ORDER events.
-    """
-    if not hasattr(global_state, "ioc_order_deltas"):
-        return
-
-    now = time.time()
-    stale_orders = []
-
-    for order_id, (market_id, delta, ts) in list(global_state.ioc_order_deltas.items()):
-        age = now - ts
-        if age > IOC_STALE_THRESHOLD:
-            stale_orders.append((order_id, market_id, delta, age))
-
-    for order_id, market_id, delta, age in stale_orders:
-        global_state.ioc_order_deltas.pop(order_id, None)
-        if hasattr(global_state, "pending_order_delta") and market_id in global_state.pending_order_delta:
-            global_state.pending_order_delta[market_id] -= delta
-            if VERBOSE:
-                print(f"[IOC STALE CLEANUP] Removed stale IOC delta {delta:.1f} for order {order_id} (age={age:.1f}s), new pending_delta={global_state.pending_order_delta[market_id]:.1f}")
-
 async def reconcile_loop_all():
     while True:
         t0 = time.time()
         try:
-            # Clean up any stale IOC deltas (safety net for missed websocket events)
-            cleanup_stale_ioc_deltas()
-
             protected = get_all_protected_ids()
             #print("PROTECTED IDS FOR DEBUG!!!: ", protected)
             # TODO: see if we are protecting too many orders
@@ -341,13 +309,6 @@ async def reconcile_loop():
 # TODO: REDUCE LATENCY, CLEAR PRINT STATEMENTS, REDUCE BACKGROUND TASKS
 # had .04 base width before, skew_k=1.0, min_order_interval=1.0, price_move_tol = .0035
 
-# Z-score predictive IOC parameters
-Z_SCORE_IOC_THRESHOLD = 25          # Minimum |z| to trigger predictive IOC (strong signal)- was .70- setting to 20 to disable IOC
-Z_IOC_OPTION_MOVE_THRESHOLD = 0.06   # 6 cents predicted option move required to justify crossing spread
-MIN_EDGE_IOC = 0.06                  # 4 cents minimum edge required after predicted move (prevents firing on stale signals)
-IOC_COOLDOWN = 5.0                  # Seconds between IOC orders (prevents spam when z-score stays elevated)
-IOC_SIZE_BUILD = 5               # fixed size for IOC orders that build/open position
-IOC_SIZE_REDUCE = 5             # max size for IOC orders that reduce position (also capped by position size)
 BASE_QUOTE_SPREAD = 0.050 # Up to .055
 MAX_POSITION = 60
 BASE_SIZE = 20.0 # Base size/max pos was 5 / 30
@@ -820,80 +781,6 @@ def update_position_yes_space(market_id: str, outcome_token: str, side: str, siz
             f"vwap_yes={pos.vwap_yes:.4f} price={price}"
         )
 
-def check_zscore_ioc_signal(market_id: str) -> tuple[bool, bool, float]:
-    """
-    Check if z-score predictor signals a high-conviction IOC opportunity.
-
-    Returns (allow_buy_yes, allow_sell_yes, predicted_option_move):
-    - allow_buy_yes = True: z-score predicts RTDS will rise, should take offer (BUY YES)
-    - allow_sell_yes = True: z-score predicts RTDS will fall, should take bid (SELL YES = BUY NO)
-    - predicted_option_move: Expected option value change (used for edge calculation)
-
-    Logic:
-    1. Check if |z| > Z_SCORE_IOC_THRESHOLD (1.7)
-    2. Calculate predicted RTDS move = z * spread_std_dev
-    3. Calculate option value change using BS model
-    4. If predicted option move > Z_IOC_OPTION_MOVE_THRESHOLD (6 cents), allow IOC
-    """
-    z = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
-
-    # Check if z-score signal is strong enough
-    if abs(z) < Z_SCORE_IOC_THRESHOLD:
-        return False, False, 0.0
-
-    # Use cached spread std (calculated in coinbase_price_stream when z-score updates)
-    # This avoids expensive np.std() recalculation on every perform_trade() call
-    spread_std = getattr(global_state, 'coinbase_rtds_spread_std', 0.0)
-    if spread_std <= 0:
-        return False, False, 0.0  # No valid std yet (cold start or insufficient data)
-
-    # Predicted RTDS move = z_score × spread_std
-    predicted_rtds_move = z * spread_std
-
-    # Get current RTDS price
-    S_current = global_state.mid_price
-    if S_current is None:
-        return False, False, 0.0
-
-    # Get vol and strike
-    sigma = global_state.fair_vol.get(market_id)
-    if sigma is None:
-        return False, False, 0.0
-
-    K = global_state.strike
-    exp = global_state.exp
-
-    # Calculate time to expiry
-    now_et = datetime.now(ZoneInfo("America/New_York"))
-    T = (exp - now_et).total_seconds() / (365 * 24 * 60 * 60)
-
-    if T <= 0:
-        return False, False, 0.0
-
-    # Calculate option value at current spot
-    current_option = bs_binary_call(S_current, K, T, 0.0, sigma, 0.0, 1.0)
-
-    # Calculate option value after predicted RTDS move
-    future_option = bs_binary_call(S_current + predicted_rtds_move, K, T, 0.0, sigma, 0.0, 1.0)
-
-    predicted_option_move = future_option - current_option
-
-    # Check if predicted move exceeds threshold
-    if abs(predicted_option_move) < Z_IOC_OPTION_MOVE_THRESHOLD:
-        return False, False, 0.0
-
-    # Determine direction
-    # z > +1.7 → RTDS will rise → option will rise → BUY YES (take offer)
-    # z < -1.7 → RTDS will fall → option will fall → SELL YES (take bid) = BUY NO
-    if z > Z_SCORE_IOC_THRESHOLD and predicted_option_move > 0:
-        print(f"[Z-IOC] z={z:.2f} predicts RTDS +${predicted_rtds_move:.2f} → option +${predicted_option_move:.3f} → BUY YES")
-        return True, False, predicted_option_move  # Buy YES
-    elif z < -Z_SCORE_IOC_THRESHOLD and predicted_option_move < 0:
-        print(f"[Z-IOC] z={z:.2f} predicts RTDS ${predicted_rtds_move:.2f} → option ${predicted_option_move:.3f} → SELL YES")
-        return False, True, predicted_option_move  # Sell YES
-
-    return False, False, 0.0
-
 async def perform_trade(market_id: str):
     """
     MM logic for BTC 15m up/down market where:
@@ -1149,75 +1036,9 @@ async def _perform_trade_locked(market_id: str):
     warm = max(0.0, 1.0 - age / W)  # 1 -> 0
     mult_warm = 1.0 + (START_WIDE - 1.0) * warm
 
-    abs_delta = abs(getattr(global_state, "binary_delta", {}).get(market_id, 0.0))
-    # normalize: probability points per 1% BTC move (more stable than per $)
-    #delta_risk = abs_delta * (global_state.mid_price or 0.0)
-
-    # simple capped multiplier
-    mult = 1.0 + min(2.0, abs_delta)  # tune numbers later
+    # Multipliers (currently disabled - kept for potential future use)
     mult = 1
-
-    # Calculate spread multiplier based on option price sensitivity
-    option_move_mult = 1.0
-
-    # Use appropriate price history based on configuration
-    price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
-    if price_source in ("COINBASE", "RTDS"):
-        price_history_spread = global_state.coinbase_price_history
-    else:  # BLEND
-        price_history_spread = global_state.binance_price_history
-
-    if len(price_history_spread) >= 2:
-        # Get BTC price change over lookback window
-        current_price_spread = price_history_spread[-1][1]
-        old_price_spread = None
-        for ts, price in reversed(list(price_history_spread)[:-1]):
-            if now - ts >= OPTION_MOVE_LOOKBACK:
-                old_price_spread = price
-                break
-
-        if old_price_spread is not None:
-            btc_move = current_price_spread - old_price_spread
-
-            # Reprice option at both prices to get option price delta
-            if price_source == "COINBASE":
-                S_current = global_state.coinbase_mid_price
-            elif price_source == "RTDS":
-                S_current = global_state.mid_price
-            else:  # BLEND
-                S_current = global_state.blended_price
-            sigma = global_state.fair_vol.get(market_id)
-
-            if S_current is not None and sigma is not None and btc_move != 0:
-                K = global_state.strike
-                now_et = datetime.now(ZoneInfo("America/New_York"))
-                T = (global_state.exp - now_et).total_seconds() / (60 * 60 * 24 * 365)
-                r = 0.0
-                q = 0.0
-                payoff = 1.0
-
-                if T > 0:
-                    # Price option at current spot
-                    current_option_price = bs_binary_call(S_current, K, T, r, sigma, q, payoff)
-
-                    # Price option at spot + recent BTC move
-                    S_shifted = S_current + btc_move
-                    shifted_option_price = bs_binary_call(S_shifted, K, T, r, sigma, q, payoff)
-
-                    # Option price move in cents
-                    option_move = abs(shifted_option_price - current_option_price)
-
-                    # If option moved more than threshold, widen spread
-                    if option_move > OPTION_MOVE_THRESHOLD:
-                        excess = option_move - OPTION_MOVE_THRESHOLD
-                        option_move_mult = 1.0 + min(MAX_OPTION_SPREAD_MULT - 1.0, excess * OPTION_MOVE_SPREAD_SCALE / 0.01)
-                        # Examples (with THRESHOLD=0.02, SCALE=0.5):
-                        # 2c option move = 1.0x (no widening)
-                        # 4c option move = 1.0 + (0.02 * 0.5 / 0.01) = 2.0x
-                        # 6c option move = 1.0 + (0.04 * 0.5 / 0.01) = 3.0x
-
-                        if VERBOSE:
-                            print(f"[MM] Option sensitivity: BTC move=${btc_move:.2f}, option move={option_move:.4f}, spread mult={option_move_mult:.2f}x")
+    option_move_mult = 1.0  # MAX_OPTION_SPREAD_MULT = 1.0 disables dynamic spread widening
 
     quote_spread = BASE_QUOTE_SPREAD * mult * mult_warm * option_move_mult
 
@@ -1226,7 +1047,6 @@ async def _perform_trade_locked(market_id: str):
         global_state.spread_mult_by_market = {}
     global_state.spread_mult_by_market[market_id] = option_move_mult
 
-    raw_size = BASE_SIZE / mult
     raw_size = BASE_SIZE
     # enforce minimum order size
     quote_size = int(max(5.0, raw_size))
@@ -1431,116 +1251,6 @@ async def _perform_trade_locked(market_id: str):
     max_buy_no   = max(0.0, filled_yes + effective_max_position - max(0, -pending_yes))
     if VERBOSE:
         print(f"[MM] capacity: max_buy_yes={max_buy_yes}, max_buy_no={max_buy_no}")
-
-    # ----- Z-score predictive IOC path (parallel execution) -----
-    ioc_tasks = []
-
-    # Atomically check cooldown to prevent spamming IOCs when z-score stays elevated
-    # Lock prevents race where two concurrent perform_trade() calls both fire IOCs
-    now = time.time()
-    should_check_signal = False
-
-    with ioc_cooldown_lock:
-        last_ioc = last_ioc_time.get(market_id, 0.0)
-        in_cooldown = (now - last_ioc) < IOC_COOLDOWN
-
-        if not in_cooldown:
-            # Claim the cooldown slot immediately (before expensive z-score calc)
-            last_ioc_time[market_id] = now
-            should_check_signal = True
-
-    if should_check_signal:
-        # Check if z-score predictor signals a high-conviction IOC opportunity
-        # (outside lock - this is expensive)
-        z_allow_buy_yes, z_allow_sell_yes, predicted_option_move = check_zscore_ioc_signal(market_id)
-    else:
-        # In cooldown - suppress IOC
-        z_allow_buy_yes, z_allow_sell_yes, predicted_option_move = False, False, 0.0
-
-    # BUY YES (take offer) - triggered by z-score prediction of RTDS rise
-    if z_allow_buy_yes and max_buy_yes > 0:
-        # Calculate expected fair value AFTER predicted move
-        expected_fair_after_move = fair_adj_yes + predicted_option_move
-
-        # Check if we STILL have edge vs current market price
-        edge_after_move = expected_fair_after_move - best_ask_yes
-
-        if edge_after_move > MIN_EDGE_IOC:
-            # Market hasn't already moved, still have edge - fire IOC
-            # Size based on position: reduce vs build
-            if filled_yes < 0:
-                # Reducing short position - use larger size
-                size = min(IOC_SIZE_REDUCE, int(abs(filled_yes)), max_buy_yes)
-            else:
-                # Building long position - use smaller size
-                size = min(IOC_SIZE_BUILD, max_buy_yes)
-
-            if size > 0:
-                z_score = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
-                print(f"\n{'='*80}")
-                print(f"IOC ORDER PLACED!!! BUY YES")
-                print(f"  SIZE: {size} @ ${best_ask_yes:.2f}")
-                print(f"  Z-SCORE: {z_score:+.2f} | PREDICTED MOVE: {predicted_option_move:+.4f}")
-                print(f"  EDGE AFTER MOVE: ${edge_after_move:.4f}")
-                print(f"{'='*80}\n")
-
-                ioc_tasks.append(send_order(
-                    yes_token,
-                    "BUY",
-                    best_ask_yes,
-                    size,
-                    "IOC",
-                    market_id=market_id,
-                ))
-        else:
-            # Market already moved, no edge left
-            print(f"[Z-IOC] Suppressed BUY YES: market already moved, edge_after_move={edge_after_move:.4f} < {MIN_EDGE_IOC:.4f}")
-
-    # SELL YES (take bid) = BUY NO - triggered by z-score prediction of RTDS fall
-    if z_allow_sell_yes and max_buy_no > 0:
-        # Calculate expected fair value AFTER predicted move
-        # predicted_option_move is negative for falling RTDS
-        expected_fair_after_move = fair_adj_yes + predicted_option_move
-
-        # Check if we STILL have edge vs current market price (for selling YES = buying NO)
-        # When selling YES, we want fair to be below bid (we can sell above fair)
-        edge_after_move = best_bid_yes - expected_fair_after_move
-
-        if edge_after_move > MIN_EDGE_IOC:
-            # Market hasn't already moved, still have edge - fire IOC
-            # Size based on position: reduce vs build
-            if filled_yes > 0:
-                # Reducing long position - use larger size
-                size = min(IOC_SIZE_REDUCE, int(abs(filled_yes)), max_buy_no)
-            else:
-                # Building short position - use smaller size
-                size = min(IOC_SIZE_BUILD, max_buy_no)
-
-            price_no = yes_to_no_price(best_bid_yes)
-            if size > 0:
-                z_score = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
-                print(f"\n{'='*80}")
-                print(f"IOC ORDER PLACED!!! SELL YES (BUY NO)")
-                print(f"  SIZE: {size} @ ${best_bid_yes:.2f} YES (${price_no:.2f} NO)")
-                print(f"  Z-SCORE: {z_score:+.2f} | PREDICTED MOVE: {predicted_option_move:+.4f}")
-                print(f"  EDGE AFTER MOVE: ${edge_after_move:.4f}")
-                print(f"{'='*80}\n")
-
-                ioc_tasks.append(send_order(
-                    no_token,
-                    "BUY",
-                    price_no,
-                    size,
-                    "IOC",
-                    market_id=market_id,
-                ))
-        else:
-            # Market already moved, no edge left
-            print(f"[Z-IOC] Suppressed SELL YES: market already moved, edge_after_move={edge_after_move:.4f} < {MIN_EDGE_IOC:.4f}")
-
-    if ioc_tasks:
-        # Cooldown timestamp already updated atomically when we claimed the slot
-        await asyncio.gather(*ioc_tasks)
 
     # ----- resting GTC path -----
     async def manage_side(side_key: str):
