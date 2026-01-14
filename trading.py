@@ -312,7 +312,7 @@ async def reconcile_loop():
 BASE_QUOTE_SPREAD = 0.050 # Up to .055
 MAX_POSITION = 60
 BASE_SIZE = 20.0 # Base size/max pos was 5 / 30
-ALIGNED_SIGNAL_SIZE = 30  # Order size when z_skew and book_imbalance agree
+ALIGNED_SIGNAL_SIZE = 20  # Order size when z_skew and book_imbalance agree
 #INV_SKEW_PER_SHARE = 0.00050
 
 SKEW_K = 1.0          # 0.3–1.0, start ~0.6
