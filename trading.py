@@ -312,6 +312,7 @@ async def reconcile_loop():
 BASE_QUOTE_SPREAD = 0.050 # Up to .055
 MAX_POSITION = 60
 BASE_SIZE = 20.0 # Base size/max pos was 5 / 30
+ALIGNED_SIGNAL_SIZE = 30  # Order size when z_skew and book_imbalance agree
 #INV_SKEW_PER_SHARE = 0.00050
 
 SKEW_K = 1.0          # 0.3–1.0, start ~0.6
@@ -1047,10 +1048,6 @@ async def _perform_trade_locked(market_id: str):
         global_state.spread_mult_by_market = {}
     global_state.spread_mult_by_market[market_id] = option_move_mult
 
-    raw_size = BASE_SIZE
-    # enforce minimum order size
-    quote_size = int(max(5.0, raw_size))
-
     # --- time-to-expiry position scaling ---
     # Reduce max position near expiry to limit gamma risk
     effective_max_position = MAX_POSITION
@@ -1199,6 +1196,13 @@ async def _perform_trade_locked(market_id: str):
     if not hasattr(global_state, 'imbalance_adj_by_market'):
         global_state.imbalance_adj_by_market = {}
     global_state.imbalance_adj_by_market[market_id] = imbalance_adj
+
+    # Dynamic sizing: use larger size when z_skew and book_imbalance agree
+    if z_skew * book_imbalance > 0:
+        raw_size = ALIGNED_SIGNAL_SIZE
+    else:
+        raw_size = BASE_SIZE
+    quote_size = int(max(5.0, raw_size))
 
     half_spread = quote_spread / 2.0
     raw_bid_yes = fair_adj_yes - half_spread
