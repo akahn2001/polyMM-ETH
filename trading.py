@@ -312,7 +312,7 @@ async def reconcile_loop():
 BASE_QUOTE_SPREAD = 0.050 # Up to .055
 MAX_POSITION = 60
 BASE_SIZE = 20.0 # Base size/max pos was 5 / 30
-ALIGNED_SIGNAL_SIZE = 20  # Order size when z_skew and book_imbalance agree
+ALIGNED_SIGNAL_SIZE = 30  # Order size when z_skew and book_imbalance agree
 #INV_SKEW_PER_SHARE = 0.00050
 
 SKEW_K = 1.0          # 0.3–1.0, start ~0.6
@@ -322,6 +322,7 @@ MIN_PRICE = 0.01
 MAX_PRICE = 0.99
 PRICE_MOVE_TOL = 0.0015          # don't cancel/replace if existing quote is within 0.5c of target
 TICK_SIZE = .01
+TICK_BOUNDARY_TOL = 0.003        # don't cancel if raw price within this distance of existing (avoids tick boundary oscillation)
 MIN_TICKS_BUILD = 0   # ticks from touch when building position (more conservative)
 MIN_TICKS_REDUCE = 0   # ticks from touch when reducing position (want to get filled)
 MIN_EDGE_TO_QUOTE = 0.02  # minimum edge (in price points) required to quote a side
@@ -1257,7 +1258,7 @@ async def _perform_trade_locked(market_id: str):
         print(f"[MM] capacity: max_buy_yes={max_buy_yes}, max_buy_no={max_buy_no}")
 
     # ----- resting GTC path -----
-    async def manage_side(side_key: str):
+    async def manage_side(side_key: str, raw_price: float):
         nonlocal wo
 
         existing = wo[side_key]
@@ -1312,9 +1313,15 @@ async def _perform_trade_locked(market_id: str):
         size = min(base_size, max_size)
 
         if existing is not None:
+            # Check 1: Same rounded price → keep
             if abs(existing["price"] - desired_price) < PRICE_MOVE_TOL:
                 if VERBOSE:
                     print(f"[MM] manage_side {side_key}: existing price close enough, doing nothing")
+                return
+            # Check 2: Different rounded price, but raw near tick boundary → keep (avoids oscillation churn)
+            if abs(raw_price - existing["price"]) < TICK_BOUNDARY_TOL:
+                if VERBOSE:
+                    print(f"[MM] manage_side {side_key}: skip cancel (near tick boundary: raw={raw_price:.4f}, existing={existing['price']:.4f})")
                 return
             if VERBOSE:
                 print(f"[MM] manage_side {side_key}: cancel stale {existing['id']} @ {existing['price']:.4f} -> {desired_price:.4f}")
@@ -1366,6 +1373,9 @@ async def _perform_trade_locked(market_id: str):
     # Use Coinbase-RTDS z-score to skip vulnerable side when PRICE_SOURCE = "RTDS"
     price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
 
+    # Compute raw NO price for ask side (used for tick boundary tolerance check)
+    raw_bid_no = 1.0 - raw_ask_yes
+
     if price_source == "RTDS":
         z = getattr(global_state, 'coinbase_rtds_zscore', 0.0)
         z_skew_by_market = getattr(global_state, 'z_skew_by_market', {})
@@ -1394,7 +1404,7 @@ async def _perform_trade_locked(market_id: str):
                     return
 
             # ASK already canceled or doesn't exist - quote BID only
-            await manage_side("bid")
+            await manage_side("bid", raw_bid_yes)
 
         elif should_skip_bid:
             # Coinbase LOW → RTDS will fall → Cancel BID if exists
@@ -1411,19 +1421,19 @@ async def _perform_trade_locked(market_id: str):
                     return
 
             # BID already canceled or doesn't exist - quote ASK only
-            await manage_side("ask")
+            await manage_side("ask", raw_bid_no)
 
         else:
             # Normal spread - quote both sides
             await asyncio.gather(
-                manage_side("bid"),
-                manage_side("ask")
+                manage_side("bid", raw_bid_yes),
+                manage_side("ask", raw_bid_no)
             )
     else:
         # COINBASE or BLEND mode - always quote both sides
         await asyncio.gather(
-            manage_side("bid"),
-            manage_side("ask")
+            manage_side("bid", raw_bid_yes),
+            manage_side("ask", raw_bid_no)
         )
 
 
