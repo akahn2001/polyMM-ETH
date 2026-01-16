@@ -121,7 +121,7 @@ binance_binary_delta = {}
 
 btc_markets = set()
 
-markouts = []
+markouts = deque(maxlen=2000)  # Bound memory - ~16 hours of fills
 
 # USDT/USD exchange rate (from Kraken)
 usdtusd = .999425
