@@ -16,6 +16,7 @@ requests
 # Performance optimizations
 orjson  # Fast JSON parsing (2-3x faster than stdlib json)
 uvloop  # Fast async event loop (Linux/macOS only)
+psutil  # Process monitoring (memory, CPU)
 
 # Data structures
 sortedcontainers

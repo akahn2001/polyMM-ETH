@@ -3,6 +3,7 @@ import time                    # Time functions
 import asyncio                 # Asynchronous I/O
 import traceback               # Exception handling
 import threading               # Thread management
+import psutil                  # Process monitoring
 
 # Use uvloop for faster async (2-4x speedup on event loop operations)
 try:
@@ -30,6 +31,28 @@ from price_blend_kalman import PriceBlendKalman
 from trading import sweep_zombie_orders_from_working, reconcile_loop, reconcile_loop_all
 from markouts import markout_loop, markout_dump_loop
 from market_scheduler import load_btc_15min_markets, run_scheduler
+
+async def health_monitor():
+    """Log health metrics every 30 seconds to diagnose performance decay."""
+    proc = psutil.Process()
+    start_time = time.time()
+
+    while True:
+        await asyncio.sleep(30)
+
+        uptime_min = (time.time() - start_time) / 60
+        mem_mb = proc.memory_info().rss / 1024 / 1024
+        tasks = len(asyncio.all_tasks())
+
+        # Count data structure sizes
+        markouts_count = len(global_state.markouts) if hasattr(global_state, 'markouts') else 0
+        vol_filters_count = len(global_state.vol_filters) if hasattr(global_state, 'vol_filters') else 0
+        processed_trades = len(global_state.processed_trade_ids) if hasattr(global_state, 'processed_trade_ids') else 0
+        filled_orders = len(global_state.filled_size_by_order) if hasattr(global_state, 'filled_size_by_order') else 0
+
+        print(f"[HEALTH] uptime={uptime_min:.1f}min mem={mem_mb:.0f}MB tasks={tasks} "
+              f"markouts={markouts_count} vol_filters={vol_filters_count} "
+              f"processed_trades={processed_trades} filled_orders={filled_orders}")
 
 def update_once(client):
     # TODO: too much looping here is wasting time
@@ -451,7 +474,8 @@ async def main():
                 reconcile_loop_all(),
                 markout_loop(),
                 markout_dump_loop(),
-                run_scheduler(csv_path, stop_before_end_seconds=60, preloaded_markets=all_markets)  # Auto-transition between markets
+                run_scheduler(csv_path, stop_before_end_seconds=60, preloaded_markets=all_markets),  # Auto-transition between markets
+                health_monitor()  # Log health metrics every 30 seconds
             )
             print("Reconnecting to the websocket")
         except:
