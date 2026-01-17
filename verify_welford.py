@@ -94,11 +94,15 @@ def test_sliding_window():
         all_values.append((ts, val))
         calc.update(val, ts)
 
-    # Only last 10 seconds should be in window
-    expected_in_window = [v for ts, v in all_values if ts >= base_time + 10]
+    # Values in window: ts >= (last_ts - lookback) = (base_time + 19) - 10 = base_time + 9
+    # So timestamps 9, 10, 11, ..., 19 = 11 values (this matches original numpy behavior)
+    last_ts = base_time + 19
+    cutoff = last_ts - 10
+    expected_in_window = [v for ts, v in all_values if ts >= cutoff]
 
     print(f"\nTotal values added: 20")
-    print(f"Values in window (last 10s): {len(expected_in_window)}")
+    print(f"Cutoff: base_time + {cutoff - base_time:.0f}")
+    print(f"Values in window: {len(expected_in_window)}")
     print(f"Welford n: {calc.n}")
     print(f"Welford history len: {len(calc.history)}")
 
@@ -115,6 +119,42 @@ def test_sliding_window():
     std_ok = abs(np_std - calc.std()) < 1e-9
 
     print(f"\n{'PASS' if n_ok else 'FAIL'}: Count matches ({calc.n} == {len(expected_in_window)})")
+    print(f"{'PASS' if mean_ok else 'FAIL'}: Mean matches")
+    print(f"{'PASS' if std_ok else 'FAIL'}: Std matches")
+
+    return n_ok and mean_ok and std_ok
+
+
+def test_maxlen_eviction():
+    """Test that maxlen eviction properly updates stats (critical bug test)."""
+    print("\n" + "=" * 60)
+    print("MAXLEN EVICTION TEST (critical)")
+    print("=" * 60)
+
+    # Small maxlen to force auto-eviction, long lookback so time eviction doesn't trigger
+    calc = WelfordZScore(lookback_seconds=1000, min_samples=3, min_std=0.01, maxlen=5)
+
+    base_time = time.time()
+
+    # Add 10 values - maxlen=5 means oldest 5 get evicted
+    for i in range(10):
+        calc.update(float(i), base_time + i)
+
+    # Should only have values 5,6,7,8,9 in stats
+    expected = [5.0, 6.0, 7.0, 8.0, 9.0]
+
+    print(f"\nAdded values 0-9, maxlen=5")
+    print(f"Expected in stats: {expected}")
+    print(f"Welford n: {calc.n}")
+    print(f"Welford history len: {len(calc.history)}")
+    print(f"Welford mean: {calc.mean:.4f}, Expected: {np.mean(expected):.4f}")
+    print(f"Welford std: {calc.std():.4f}, Expected: {np.std(expected):.4f}")
+
+    n_ok = calc.n == 5
+    mean_ok = abs(calc.mean - np.mean(expected)) < 1e-9
+    std_ok = abs(calc.std() - np.std(expected)) < 1e-9
+
+    print(f"\n{'PASS' if n_ok else 'FAIL'}: Count is 5 (got {calc.n})")
     print(f"{'PASS' if mean_ok else 'FAIL'}: Mean matches")
     print(f"{'PASS' if std_ok else 'FAIL'}: Std matches")
 
@@ -168,10 +208,11 @@ def test_speed():
 if __name__ == "__main__":
     acc_ok = test_accuracy()
     window_ok = test_sliding_window()
+    maxlen_ok = test_maxlen_eviction()
     test_speed()
 
     print("\n" + "=" * 60)
-    if acc_ok and window_ok:
+    if acc_ok and window_ok and maxlen_ok:
         print("ALL TESTS PASSED - Welford matches numpy exactly")
     else:
         print("SOME TESTS FAILED - Check output above")

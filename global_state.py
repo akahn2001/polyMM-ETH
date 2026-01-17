@@ -15,12 +15,13 @@ class WelfordZScore:
     O(1) streaming z-score calculator using Welford's online algorithm.
     Maintains a sliding time window and computes mean/std incrementally.
     """
-    __slots__ = ('lookback_seconds', 'min_samples', 'min_std', 'history', 'n', 'mean', 'M2')
+    __slots__ = ('lookback_seconds', 'min_samples', 'min_std', 'history', 'n', 'mean', 'M2', '_maxlen')
 
     def __init__(self, lookback_seconds=600, min_samples=200, min_std=0.10, maxlen=500):
         self.lookback_seconds = lookback_seconds
         self.min_samples = min_samples
         self.min_std = min_std
+        self._maxlen = maxlen
         self.history = deque(maxlen=maxlen)  # (timestamp, value)
         self.n = 0
         self.mean = 0.0
@@ -52,6 +53,11 @@ class WelfordZScore:
 
     def update(self, value, ts):
         """Add new value and evict old ones outside the lookback window."""
+        # Handle maxlen auto-eviction: if at capacity, remove oldest from stats BEFORE append
+        if self._maxlen is not None and len(self.history) >= self._maxlen:
+            old_ts, old_val = self.history[0]  # This will be auto-evicted by append
+            self._remove(old_val)
+
         # Add new value
         self.history.append((ts, value))
         self._add(value)
