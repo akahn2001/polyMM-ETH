@@ -21,13 +21,13 @@ Z_SCORE_CONFIDENCE_STEEPNESS = 5.0  # How sharp the sigmoid transition is
 
 # Cap on total signal adjustments (book imbalance + z-score skew combined)
 # Prevents crossing spread when both signals fire strongly in same direction
-MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.04  # Cap combined adjustments at ±2.5¢ from mid
+MAX_TOTAL_SIGNAL_ADJUSTMENT = 0.05  # Cap combined adjustments at ±2.5¢ from mid
 
 # Aggressive mode: increase cap when high conviction signals align
 # Allows crossing spread to take liquidity when edge is high
 AGGRESSIVE_MODE_ENABLED = True
 AGGRESSIVE_Z_THRESHOLD = 2.0           # Minimum |z-score| to trigger aggressive mode
-AGGRESSIVE_ZSKEW_THRESHOLD = 0.07      # Minimum |z_skew_residual| (edge remaining after market moved)
+AGGRESSIVE_ZSKEW_THRESHOLD = 0.06      # Minimum |z_skew_residual| (edge remaining after market moved)
 AGGRESSIVE_MAX_TOTAL_ADJUSTMENT = 0.0575  # 5.75¢ cap when aggressive (crosses spread by 1+ tick)
 AGGRESSIVE_MAX_Z_SCORE_SKEW = 0.0575      # Allow 5.75¢ z_skew in aggressive mode (vs 3.5¢ normal)
-AGGRESSIVE_SIZE = 60                   # Fixed order size in aggressive mode (vs BASE_SIZE=20 normal)
+AGGRESSIVE_SIZE = 100                   # Fixed order size in aggressive mode (vs BASE_SIZE=20 normal)
