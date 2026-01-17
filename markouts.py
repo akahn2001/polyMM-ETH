@@ -150,7 +150,7 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
         S_current = global_state.blended_price
 
     if S_current is not None and realized_vol_15m is not None:
-        from util import bs_binary_call
+        from rust_math import bs_binary_call
         K = global_state.strike
         T = (global_state.exp - datetime.now(ZoneInfo("America/New_York"))).total_seconds() / (60 * 60 * 24 * 365)
         if T > 0:
@@ -193,7 +193,7 @@ def record_fill(market_id, token_id, side, price, size, ts=None, order_type="GTC
     sigma = global_state.fair_vol.get(market_id)
 
     if S_current is not None and sigma is not None and momentum != 0:
-        from util import bs_binary_call
+        from rust_math import bs_binary_call
 
         K = global_state.strike
         T = (global_state.exp - datetime.now(ZoneInfo("America/New_York"))).total_seconds() / (60 * 60 * 24 * 365)

@@ -20,7 +20,8 @@ def _set_tcp_nodelay(ws):
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     except Exception:
         pass
-from util import update_binance_fair_value_for_market, update_fair_value_for_market, bs_binary_call, update_realized_vol
+from util import update_binance_fair_value_for_market, update_fair_value_for_market, update_realized_vol
+from rust_math import bs_binary_call
 from trading import perform_trade, MIN_ORDER_INTERVAL, cancel_order_async, EARLY_CANCEL_OPTION_MOVE
 
 BINANCE_WS = "wss://stream.binance.com:9443/ws/btcusdt@bookTicker"

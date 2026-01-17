@@ -10,7 +10,7 @@ from markouts import record_fill
 from global_state import MarketPosition
 from py_clob_client.exceptions import PolyApiException
 from py_clob_client.clob_types import OpenOrderParams
-from util import bs_binary_call
+from rust_math import bs_binary_call
 from trading_config import (
     MAX_IMBALANCE_ADJUSTMENT,
     MAX_MOMENTUM_ADJUSTMENT,

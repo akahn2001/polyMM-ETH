@@ -23,7 +23,8 @@ from websocket_handlers import connect_market_websocket, connect_user_websocket
 from price_stream import stream_btc_usd
 from binance_price_stream import get_usdt_usd_rate, get_binance_btcusdt_mid, stream_binance_btcusdt_mid
 from coinbase_price_stream import stream_coinbase_btcusd_mid
-from util import get_best_bid_offer, bs_binary_call, bs_binary_call_implied_vol_closed
+from util import get_best_bid_offer
+from rust_math import bs_binary_call, bs_binary_call_implied_vol_closed
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from kalman_filter import VolKalman1D

@@ -74,7 +74,8 @@ def _update_coinbase_rtds_zscore(coinbase_mid_usd: float):
         global_state.coinbase_rtds_spread_std = 0.0  # No valid std yet
 
 
-from util import update_binance_fair_value_for_market, update_fair_value_for_market, bs_binary_call, update_realized_vol
+from util import update_binance_fair_value_for_market, update_fair_value_for_market, update_realized_vol
+from rust_math import bs_binary_call
 from trading import perform_trade, MIN_ORDER_INTERVAL, cancel_order_async, EARLY_CANCEL_OPTION_MOVE
 
 COINBASE_WS = "wss://ws-feed.exchange.coinbase.com"
