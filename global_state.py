@@ -1,5 +1,6 @@
 import threading
 import asyncio
+import math
 import pandas as pd
 import json
 import ast
@@ -7,6 +8,77 @@ from collections import deque
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from dataclasses import dataclass, field
+
+
+class WelfordZScore:
+    """
+    O(1) streaming z-score calculator using Welford's online algorithm.
+    Maintains a sliding time window and computes mean/std incrementally.
+    """
+    __slots__ = ('lookback_seconds', 'min_samples', 'min_std', 'history', 'n', 'mean', 'M2')
+
+    def __init__(self, lookback_seconds=600, min_samples=200, min_std=0.10, maxlen=500):
+        self.lookback_seconds = lookback_seconds
+        self.min_samples = min_samples
+        self.min_std = min_std
+        self.history = deque(maxlen=maxlen)  # (timestamp, value)
+        self.n = 0
+        self.mean = 0.0
+        self.M2 = 0.0  # Sum of squared deviations from mean
+
+    def _add(self, x):
+        """Add a value to running statistics."""
+        self.n += 1
+        delta = x - self.mean
+        self.mean += delta / self.n
+        delta2 = x - self.mean
+        self.M2 += delta * delta2
+
+    def _remove(self, x):
+        """Remove a value from running statistics."""
+        if self.n <= 1:
+            self.n = 0
+            self.mean = 0.0
+            self.M2 = 0.0
+            return
+        self.n -= 1
+        delta = x - self.mean
+        self.mean -= delta / self.n
+        delta2 = x - self.mean
+        self.M2 -= delta * delta2
+        # Numerical stability: M2 should never be negative
+        if self.M2 < 0:
+            self.M2 = 0.0
+
+    def update(self, value, ts):
+        """Add new value and evict old ones outside the lookback window."""
+        # Add new value
+        self.history.append((ts, value))
+        self._add(value)
+
+        # Evict old values outside lookback window
+        cutoff = ts - self.lookback_seconds
+        while self.history and self.history[0][0] < cutoff:
+            old_ts, old_val = self.history.popleft()
+            self._remove(old_val)
+
+    def std(self):
+        """Return current standard deviation."""
+        if self.n < 2:
+            return 0.0
+        return math.sqrt(self.M2 / self.n)
+
+    def get_zscore(self, current_value):
+        """Calculate z-score for a value against current statistics."""
+        if self.n < self.min_samples:
+            return 0.0, 0.0  # (zscore, std)
+
+        std = self.std()
+        if std < self.min_std:
+            return 0.0, std
+
+        zscore = (current_value - self.mean) / std
+        return zscore, std
 
 USER_OWNER_ID = "36e9b72d-fb6b-151f-0ad7-869f32584268"
 
@@ -97,8 +169,9 @@ coinbase_rtds_spread_history = deque(maxlen=1000)  # Track (timestamp, rtds - co
 coinbase_bias_correction = 2.0  # Dollars to add to Coinbase for theo (initial assumption: CB is $2 below RTDS)
 
 # Coinbase-RTDS spread z-score tracking (for predictive edge when using RTDS)
-coinbase_rtds_zscore_history = deque(maxlen=500)  # Track (timestamp, coinbase - rtds) for z-score
+coinbase_rtds_zscore_history = deque(maxlen=500)  # Track (timestamp, coinbase - rtds) for z-score - LEGACY, kept for compatibility
 coinbase_rtds_zscore = 0.0  # Current z-score: positive = Coinbase high (RTDS will rise), negative = Coinbase low (RTDS will fall)
+coinbase_rtds_zscore_calculator = WelfordZScore(lookback_seconds=600, min_samples=200, min_std=0.10, maxlen=500)  # O(1) streaming z-score
 
 # Price blending (Kalman filter combining Binance + RTDS)
 price_blend_filter = None

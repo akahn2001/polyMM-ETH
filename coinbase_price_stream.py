@@ -24,6 +24,7 @@ def _set_tcp_nodelay(ws):
 def _update_coinbase_rtds_zscore(coinbase_mid_usd: float):
     """
     Calculate z-score of Coinbase-RTDS spread for predictive edge detection.
+    Uses Welford's O(1) streaming algorithm instead of O(n) numpy.
 
     Z-score > +2.0: Coinbase HIGH relative to RTDS → RTDS will rise → Keep BID, cancel ASK
     Z-score < -2.0: Coinbase LOW relative to RTDS → RTDS will fall → Keep ASK, cancel BID
@@ -42,36 +43,16 @@ def _update_coinbase_rtds_zscore(coinbase_mid_usd: float):
     spread = coinbase_mid_usd - rtds_price
     now = time.time()
 
-    # Store spread in history
-    global_state.coinbase_rtds_zscore_history.append((now, spread))
+    # Update streaming calculator (O(1) - adds new value, evicts old ones)
+    calc = global_state.coinbase_rtds_zscore_calculator
+    calc.update(spread, now)
 
-    # Calculate z-score from recent window
-    LOOKBACK_SECONDS = 10 * 60  # 10 minutes
-    MIN_SAMPLES = 200           # Need 200+ samples for stable stats
-    MIN_STD_DEV = 0.10          # Ignore if spread too stable ($0.10 threshold)
+    # Get z-score and std from streaming stats
+    zscore, std = calc.get_zscore(spread)
 
-    cutoff_time = now - LOOKBACK_SECONDS
-    recent_spreads = [s for (ts, s) in global_state.coinbase_rtds_zscore_history if ts >= cutoff_time]
-
-    if len(recent_spreads) >= MIN_SAMPLES:
-        import numpy as np
-        mean = np.mean(recent_spreads)
-        std = np.std(recent_spreads)
-
-        # Cache spread std for use in z-score skew and IOC calculations
-        # This avoids recalculating np.std() in perform_trade() every time
-        global_state.coinbase_rtds_spread_std = std
-
-        if std > MIN_STD_DEV:
-            # Valid signal - calculate z-score
-            global_state.coinbase_rtds_zscore = (spread - mean) / std
-        else:
-            # Spread too stable - no predictive signal
-            global_state.coinbase_rtds_zscore = 0.0
-    else:
-        # Not enough data yet - cold start
-        global_state.coinbase_rtds_zscore = 0.0
-        global_state.coinbase_rtds_spread_std = 0.0  # No valid std yet
+    # Update global state
+    global_state.coinbase_rtds_zscore = zscore
+    global_state.coinbase_rtds_spread_std = std
 
 
 from util import update_binance_fair_value_for_market, update_fair_value_for_market, update_realized_vol
@@ -159,8 +140,8 @@ def _update_coinbase_theos(coinbase_mid_usd: float):
 
     _last_coinbase_mid_usd = coinbase_mid_usd
 
-    # Update realized vol estimates (5m and 15m) - use Coinbase history if enabled
-    update_realized_vol()
+    # Update realized vol estimates (5m and 15m) - DISABLED: not used for trading, saves ~280μs/tick
+    # update_realized_vol()
 
     # Calculate Coinbase-RTDS spread z-score (predictive signal for RTDS mode)
     _update_coinbase_rtds_zscore(coinbase_mid_usd)

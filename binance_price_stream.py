@@ -207,8 +207,8 @@ def _update_binance_theos(binance_mid_usdt: float):
 
     _last_binance_mid_usd = binance_mid_usd
 
-    # Update realized vol estimates (5m and 15m)
-    update_realized_vol()
+    # Update realized vol estimates (5m and 15m) - DISABLED: not used for trading, saves ~280μs/tick
+    # update_realized_vol()
 
     # Update price blend Kalman filter
     if hasattr(global_state, 'price_blend_filter') and global_state.price_blend_filter is not None:
