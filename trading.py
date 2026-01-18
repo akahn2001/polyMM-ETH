@@ -25,8 +25,7 @@ from trading_config import (
     AGGRESSIVE_ZSKEW_THRESHOLD,
     AGGRESSIVE_MAX_TOTAL_ADJUSTMENT,
     AGGRESSIVE_MAX_Z_SCORE_SKEW,
-    AGGRESSIVE_SIZE,
-    TRACK_CANCEL_PENDING_AGGRESSIVE_ONLY
+    AGGRESSIVE_SIZE
 )
 
 # TODO: 12/17 WE STILL AREN'T CANCELLING ORDERS CORRECTLY- currently using print statements to debug the open_orders from api. vs. protected orders set logic
@@ -438,22 +437,7 @@ async def _send_order_locked(token_id: str, side: str, price: float, size: float
         # Include pending_order_delta (tracks in-flight IOC orders)
         # Delta is added when IOC order is placed, removed when TRADE event confirms fill
         pending_delta = getattr(global_state, "pending_order_delta", {}).get(market_id, 0.0)
-
-        # Include cancel_pending_delta (tracks orders pending cancel that might have filled)
-        # Delta is added when order is cancelled, removed when terminal status confirmed
-        # Clean up stale entries older than 10 seconds (safety net for missed events)
-        cancel_pending = getattr(global_state, "cancel_pending_delta", {})
-        now = time.time()
-        stale_ids = [oid for oid, entry in cancel_pending.items() if len(entry) >= 3 and now - entry[2] > 10]
-        for oid in stale_ids:
-            cancel_pending.pop(oid, None)
-
-        cancel_delta = sum(
-            entry[1] for oid, entry in cancel_pending.items()
-            if entry[0] == market_id
-        )
-
-        effective_yes = filled_yes + pending_yes + pending_delta + cancel_delta
+        effective_yes = filled_yes + pending_yes + pending_delta
 
         # delta from THIS order
         if token_id == yes_token:
@@ -1294,8 +1278,8 @@ async def _perform_trade_locked(market_id: str):
         if VERBOSE:
             print(f"[MM] manage_side {side_key}: desired_price={desired_price}, max_size={max_size}, edge={edge:.4f}, existing={existing}")
 
-        # Don't quote if we don't have minimum edge (bypass in aggressive mode - we're crossing spread intentionally)
-        if not aggressive_mode and edge < MIN_EDGE_TO_QUOTE:
+        # Don't quote if we don't have minimum edge
+        if edge < MIN_EDGE_TO_QUOTE:
             if existing is not None:
                 if VERBOSE:
                     print(f"[MM] manage_side {side_key}: cancel (no edge: {edge:.4f} < {MIN_EDGE_TO_QUOTE}) id={existing['id']}")
@@ -1329,24 +1313,13 @@ async def _perform_trade_locked(market_id: str):
         size = min(base_size, max_size)
 
         if existing is not None:
-            upgrading_size = False  # Flag to skip tick boundary check when upgrading
-
-            # Check 1: Same rounded price → keep (unless aggressive mode needs size upgrade)
+            # Check 1: Same rounded price → keep
             if abs(existing["price"] - desired_price) < PRICE_MOVE_TOL:
-                existing_size = existing.get("size", 0)
-                # In aggressive mode, upgrade if existing order is smaller
-                if aggressive_mode and existing_size < size:
-                    if VERBOSE:
-                        print(f"[MM] manage_side {side_key}: upgrading to aggressive size {existing_size} -> {size}")
-                    upgrading_size = True  # Skip tick boundary check, go straight to cancel
-                else:
-                    if VERBOSE:
-                        print(f"[MM] manage_side {side_key}: existing price close enough, doing nothing")
-                    return
-
+                if VERBOSE:
+                    print(f"[MM] manage_side {side_key}: existing price close enough, doing nothing")
+                return
             # Check 2: Different rounded price, but raw near tick boundary → keep (avoids oscillation churn)
-            # Skip this check if upgrading size OR in aggressive mode (we want the aggressive price)
-            if not upgrading_size and not aggressive_mode and abs(raw_price - existing["price"]) < TICK_BOUNDARY_TOL:
+            if abs(raw_price - existing["price"]) < TICK_BOUNDARY_TOL:
                 if VERBOSE:
                     print(f"[MM] manage_side {side_key}: skip cancel (near tick boundary: raw={raw_price:.4f}, existing={existing['price']:.4f})")
                 return
@@ -1356,41 +1329,11 @@ async def _perform_trade_locked(market_id: str):
                 existing["cancel_requested"] = True
                 existing["cancel_requested_at"] = time.time()
                 await cancel_order_async(existing["id"])
-
-            # Track order delta until we confirm it's gone (filled or cancelled)
-            # This prevents position overshoot if order filled before cancel processed
-            # Controlled by TRACK_CANCEL_PENDING_AGGRESSIVE_ONLY flag
-            should_track = not TRACK_CANCEL_PENDING_AGGRESSIVE_ONLY or aggressive_mode
-
-            if should_track:
-                order_id_to_track = existing.get("id")
-                order_size = existing.get("size", 0)
-                order_token = existing.get("token")
-                order_side = (existing.get("side") or "").upper()
-
-                if order_id_to_track and order_size > 0:
-                    # Calculate delta in YES-space
-                    if order_token == yes_token:
-                        order_delta = order_size if order_side == "BUY" else -order_size
-                    elif order_token == no_token:
-                        order_delta = -order_size if order_side == "BUY" else order_size
-                    else:
-                        order_delta = 0
-
-                    # Only track if order increases position in current direction
-                    # (same logic as pending_yes in _send_order_locked)
-                    if (filled_yes >= 0 and order_delta > 0) or (filled_yes <= 0 and order_delta < 0):
-                        if not hasattr(global_state, "cancel_pending_delta"):
-                            global_state.cancel_pending_delta = {}
-                        # Store (market_id, delta, timestamp) for timeout cleanup
-                        global_state.cancel_pending_delta[order_id_to_track] = (market_id, order_delta, time.time())
-
             wo[side_key] = None
-            # In aggressive mode: place order immediately (don't waste the signal)
-            # cancel_pending_delta protects against race condition if cancelled order fills
-            # In normal mode: skip cycle to avoid both orders being live simultaneously
-            if not aggressive_mode:
-                return
+            # CRITICAL: Skip this quote cycle after canceling to prevent race condition
+            # If we place new order immediately, both orders could be live for 50-200ms
+            # Next perform_trade() will place the new order with correct price
+            return
         if VERBOSE:
             print(f"[MM] manage_side {side_key}: sending GTC {side_str} size={size} px={desired_price} token={token_id}")
 

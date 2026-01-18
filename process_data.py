@@ -218,19 +218,6 @@ def process_user_data(rows):
                             global_state.pending_order_delta[ioc_market_id] -= ioc_delta
                             if VERBOSE:
                                 print(f"[IOC ORDER TERMINAL] Removed pending delta {ioc_delta:.1f} for order {order_id} (status={status}), new pending_delta={global_state.pending_order_delta[ioc_market_id]:.1f}")
-
-                # Clean up cancel_pending_delta (tracks orders that were cancelled but might have filled)
-                if order_id and hasattr(global_state, "cancel_pending_delta"):
-                    global_state.cancel_pending_delta.pop(order_id, None)
-
-                # Clear wo["bid"]/wo["ask"] if this order matches
-                # This prevents double-counting when order fills before we try to cancel
-                if order_id and hasattr(global_state, "working_orders_by_market"):
-                    wo = global_state.working_orders_by_market.get(market, {})
-                    for side_key in ("bid", "ask"):
-                        entry = wo.get(side_key)
-                        if isinstance(entry, dict) and entry.get("id") == order_id:
-                            wo[side_key] = None
             else:
                 orders_for_market[order_id] = {
                     "order_id": order_id,
@@ -250,11 +237,8 @@ def process_user_data(rows):
             last_matched = global_state.filled_size_by_order.get(order_id, 0.0)
             delta_fill = matched_sz - last_matched
 
-            # Always track order_id so TRADE events know to skip (avoid double-counting)
-            # This runs even when delta_fill=0 (order just placed, not yet filled)
-            global_state.filled_size_by_order[order_id] = matched_sz
-
             if delta_fill > 0:
+                global_state.filled_size_by_order[order_id] = matched_sz
 
                 #print(
                  #   f"[USER FILL-ORDER] market={market} order={order_id} "
@@ -319,14 +303,6 @@ def process_user_data(rows):
             if status not in ("MATCHED", "FILLED"):
                 if VERBOSE:
                     print(f"[USER TRADE] Ignoring status={status} for position update")
-                continue
-
-            # Skip if this order is tracked via ORDER events (GTC orders)
-            # GTC fills are already processed via size_matched delta in ORDER event handler
-            # Only process TRADE events for IOC orders (which don't have ORDER event tracking)
-            if order_id and order_id in global_state.filled_size_by_order:
-                if VERBOSE:
-                    print(f"[USER TRADE] Skipping - already tracked via ORDER event (order_id={order_id})")
                 continue
 
             # ✅ Update YES-space position for taker-side fills (IOC)
