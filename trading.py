@@ -1329,6 +1329,8 @@ async def _perform_trade_locked(market_id: str):
         size = min(base_size, max_size)
 
         if existing is not None:
+            upgrading_size = False  # Flag to skip tick boundary check when upgrading
+
             # Check 1: Same rounded price → keep (unless aggressive mode needs size upgrade)
             if abs(existing["price"] - desired_price) < PRICE_MOVE_TOL:
                 existing_size = existing.get("size", 0)
@@ -1336,13 +1338,15 @@ async def _perform_trade_locked(market_id: str):
                 if aggressive_mode and existing_size < size:
                     if VERBOSE:
                         print(f"[MM] manage_side {side_key}: upgrading to aggressive size {existing_size} -> {size}")
-                    # Fall through to cancel logic
+                    upgrading_size = True  # Skip tick boundary check, go straight to cancel
                 else:
                     if VERBOSE:
                         print(f"[MM] manage_side {side_key}: existing price close enough, doing nothing")
                     return
+
             # Check 2: Different rounded price, but raw near tick boundary → keep (avoids oscillation churn)
-            if abs(raw_price - existing["price"]) < TICK_BOUNDARY_TOL:
+            # Skip this check if we're upgrading size (price is same, just need bigger order)
+            if not upgrading_size and abs(raw_price - existing["price"]) < TICK_BOUNDARY_TOL:
                 if VERBOSE:
                     print(f"[MM] manage_side {side_key}: skip cancel (near tick boundary: raw={raw_price:.4f}, existing={existing['price']:.4f})")
                 return
