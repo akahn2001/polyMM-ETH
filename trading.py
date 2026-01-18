@@ -315,7 +315,7 @@ BASE_SIZE = 30.0 # Base size/max pos was 5 / 30
 ALIGNED_SIGNAL_SIZE = 50  # Order size when z_skew and book_imbalance agree
 #INV_SKEW_PER_SHARE = 0.00050
 
-SKEW_K = 1.0          # 0.3–1.0, start ~0.6
+SKEW_K = 1.25          # 0.3–1.0, start ~0.6
 SKEW_CAP = 0.04       # max skew in price points (5c)
 
 MIN_PRICE = 0.01
