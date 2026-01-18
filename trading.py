@@ -1278,8 +1278,8 @@ async def _perform_trade_locked(market_id: str):
         if VERBOSE:
             print(f"[MM] manage_side {side_key}: desired_price={desired_price}, max_size={max_size}, edge={edge:.4f}, existing={existing}")
 
-        # Don't quote if we don't have minimum edge
-        if edge < MIN_EDGE_TO_QUOTE:
+        # Don't quote if we don't have minimum edge (bypass in aggressive mode - crossing spread intentionally)
+        if not aggressive_mode and edge < MIN_EDGE_TO_QUOTE:
             if existing is not None:
                 if VERBOSE:
                     print(f"[MM] manage_side {side_key}: cancel (no edge: {edge:.4f} < {MIN_EDGE_TO_QUOTE}) id={existing['id']}")
@@ -1330,10 +1330,10 @@ async def _perform_trade_locked(market_id: str):
                 existing["cancel_requested_at"] = time.time()
                 await cancel_order_async(existing["id"])
             wo[side_key] = None
-            # CRITICAL: Skip this quote cycle after canceling to prevent race condition
-            # If we place new order immediately, both orders could be live for 50-200ms
-            # Next perform_trade() will place the new order with correct price
-            return
+            # In aggressive mode: place order immediately (don't lose the transient signal)
+            # In normal mode: skip cycle to avoid both orders being live simultaneously
+            if not aggressive_mode:
+                return
         if VERBOSE:
             print(f"[MM] manage_side {side_key}: sending GTC {side_str} size={size} px={desired_price} token={token_id}")
 
