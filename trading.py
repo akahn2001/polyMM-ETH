@@ -310,12 +310,12 @@ async def reconcile_loop():
 # had .04 base width before, skew_k=1.0, min_order_interval=1.0, price_move_tol = .0035
 
 BASE_QUOTE_SPREAD = 0.050 # Up to .055
-MAX_POSITION = 150
-BASE_SIZE = 30.0 # Base size/max pos was 5 / 30
-ALIGNED_SIGNAL_SIZE = 50  # Order size when z_skew and book_imbalance agree
+MAX_POSITION = 100
+BASE_SIZE = 20.0 # Base size/max pos was 5 / 30
+ALIGNED_SIGNAL_SIZE = 30  # Order size when z_skew and book_imbalance agree
 #INV_SKEW_PER_SHARE = 0.00050
 
-SKEW_K = 1.25          # 0.3–1.0, start ~0.6
+SKEW_K = 1.0          # 0.3–1.0, start ~0.6
 SKEW_CAP = 0.04       # max skew in price points (5c)
 
 MIN_PRICE = 0.01
@@ -1278,8 +1278,8 @@ async def _perform_trade_locked(market_id: str):
         if VERBOSE:
             print(f"[MM] manage_side {side_key}: desired_price={desired_price}, max_size={max_size}, edge={edge:.4f}, existing={existing}")
 
-        # Don't quote if we don't have minimum edge (bypass in aggressive mode - crossing spread intentionally)
-        if not aggressive_mode and edge < MIN_EDGE_TO_QUOTE:
+        # Don't quote if we don't have minimum edge
+        if edge < MIN_EDGE_TO_QUOTE:
             if existing is not None:
                 if VERBOSE:
                     print(f"[MM] manage_side {side_key}: cancel (no edge: {edge:.4f} < {MIN_EDGE_TO_QUOTE}) id={existing['id']}")
@@ -1330,10 +1330,10 @@ async def _perform_trade_locked(market_id: str):
                 existing["cancel_requested_at"] = time.time()
                 await cancel_order_async(existing["id"])
             wo[side_key] = None
-            # In aggressive mode: place order immediately (don't lose the transient signal)
-            # In normal mode: skip cycle to avoid both orders being live simultaneously
-            if not aggressive_mode:
-                return
+            # CRITICAL: Skip this quote cycle after canceling to prevent race condition
+            # If we place new order immediately, both orders could be live for 50-200ms
+            # Next perform_trade() will place the new order with correct price
+            return
         if VERBOSE:
             print(f"[MM] manage_side {side_key}: sending GTC {side_str} size={size} px={desired_price} token={token_id}")
 
@@ -1400,9 +1400,10 @@ async def _perform_trade_locked(market_id: str):
                     ask_order["cancel_requested_at"] = time.time()
                     await cancel_order_async(ask_order["id"])
                     wo["ask"] = None
-                    # Don't return - immediately quote the safe side (no race between different sides)
+                    # Skip this cycle to prevent race (cancel needs time to process)
+                    return
 
-            # Quote BID only (safe side when z > 0)
+            # ASK already canceled or doesn't exist - quote BID only
             await manage_side("bid", raw_bid_yes)
 
         elif should_skip_bid:
@@ -1416,9 +1417,10 @@ async def _perform_trade_locked(market_id: str):
                     bid_order["cancel_requested_at"] = time.time()
                     await cancel_order_async(bid_order["id"])
                     wo["bid"] = None
-                    # Don't return - immediately quote the safe side (no race between different sides)
+                    # Skip this cycle to prevent race (cancel needs time to process)
+                    return
 
-            # Quote ASK only (safe side when z < 0)
+            # BID already canceled or doesn't exist - quote ASK only
             await manage_side("ask", raw_bid_no)
 
         else:
