@@ -30,4 +30,4 @@ AGGRESSIVE_Z_THRESHOLD = 2.0           # Minimum |z-score| to trigger aggressive
 AGGRESSIVE_ZSKEW_THRESHOLD = 0.06      # Minimum |z_skew_residual| (edge remaining after market moved)
 AGGRESSIVE_MAX_TOTAL_ADJUSTMENT = 0.0575  # 5.75¢ cap when aggressive (crosses spread by 1+ tick)
 AGGRESSIVE_MAX_Z_SCORE_SKEW = 0.0575      # Allow 5.75¢ z_skew in aggressive mode (vs 3.5¢ normal)
-AGGRESSIVE_SIZE = 75                   # Fixed order size in aggressive mode (vs BASE_SIZE=20 normal)
+AGGRESSIVE_SIZE = 100                   # Fixed order size in aggressive mode (vs BASE_SIZE=20 normal)
