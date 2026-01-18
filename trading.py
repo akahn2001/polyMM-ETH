@@ -1400,10 +1400,9 @@ async def _perform_trade_locked(market_id: str):
                     ask_order["cancel_requested_at"] = time.time()
                     await cancel_order_async(ask_order["id"])
                     wo["ask"] = None
-                    # Skip this cycle to prevent race (cancel needs time to process)
-                    return
+                    # Don't return - immediately quote the safe side (no race between different sides)
 
-            # ASK already canceled or doesn't exist - quote BID only
+            # Quote BID only (safe side when z > 0)
             await manage_side("bid", raw_bid_yes)
 
         elif should_skip_bid:
@@ -1417,10 +1416,9 @@ async def _perform_trade_locked(market_id: str):
                     bid_order["cancel_requested_at"] = time.time()
                     await cancel_order_async(bid_order["id"])
                     wo["bid"] = None
-                    # Skip this cycle to prevent race (cancel needs time to process)
-                    return
+                    # Don't return - immediately quote the safe side (no race between different sides)
 
-            # BID already canceled or doesn't exist - quote ASK only
+            # Quote ASK only (safe side when z < 0)
             await manage_side("ask", raw_bid_no)
 
         else:
