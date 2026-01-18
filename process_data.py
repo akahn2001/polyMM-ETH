@@ -218,6 +218,10 @@ def process_user_data(rows):
                             global_state.pending_order_delta[ioc_market_id] -= ioc_delta
                             if VERBOSE:
                                 print(f"[IOC ORDER TERMINAL] Removed pending delta {ioc_delta:.1f} for order {order_id} (status={status}), new pending_delta={global_state.pending_order_delta[ioc_market_id]:.1f}")
+
+                # Clean up cancel_pending_delta (tracks orders that were cancelled but might have filled)
+                if order_id and hasattr(global_state, "cancel_pending_delta"):
+                    global_state.cancel_pending_delta.pop(order_id, None)
             else:
                 orders_for_market[order_id] = {
                     "order_id": order_id,

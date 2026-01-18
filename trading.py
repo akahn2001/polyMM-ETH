@@ -25,7 +25,8 @@ from trading_config import (
     AGGRESSIVE_ZSKEW_THRESHOLD,
     AGGRESSIVE_MAX_TOTAL_ADJUSTMENT,
     AGGRESSIVE_MAX_Z_SCORE_SKEW,
-    AGGRESSIVE_SIZE
+    AGGRESSIVE_SIZE,
+    TRACK_CANCEL_PENDING_AGGRESSIVE_ONLY
 )
 
 # TODO: 12/17 WE STILL AREN'T CANCELLING ORDERS CORRECTLY- currently using print statements to debug the open_orders from api. vs. protected orders set logic
@@ -437,7 +438,15 @@ async def _send_order_locked(token_id: str, side: str, price: float, size: float
         # Include pending_order_delta (tracks in-flight IOC orders)
         # Delta is added when IOC order is placed, removed when TRADE event confirms fill
         pending_delta = getattr(global_state, "pending_order_delta", {}).get(market_id, 0.0)
-        effective_yes = filled_yes + pending_yes + pending_delta
+
+        # Include cancel_pending_delta (tracks orders pending cancel that might have filled)
+        # Delta is added when order is cancelled, removed when terminal status confirmed
+        cancel_delta = sum(
+            delta for oid, (mid, delta) in getattr(global_state, "cancel_pending_delta", {}).items()
+            if mid == market_id
+        )
+
+        effective_yes = filled_yes + pending_yes + pending_delta + cancel_delta
 
         # delta from THIS order
         if token_id == yes_token:
@@ -1329,6 +1338,34 @@ async def _perform_trade_locked(market_id: str):
                 existing["cancel_requested"] = True
                 existing["cancel_requested_at"] = time.time()
                 await cancel_order_async(existing["id"])
+
+            # Track order delta until we confirm it's gone (filled or cancelled)
+            # This prevents position overshoot if order filled before cancel processed
+            # Controlled by TRACK_CANCEL_PENDING_AGGRESSIVE_ONLY flag
+            should_track = not TRACK_CANCEL_PENDING_AGGRESSIVE_ONLY or aggressive_mode
+
+            if should_track:
+                order_id_to_track = existing.get("id")
+                order_size = existing.get("size", 0)
+                order_token = existing.get("token")
+                order_side = (existing.get("side") or "").upper()
+
+                if order_id_to_track and order_size > 0:
+                    # Calculate delta in YES-space
+                    if order_token == yes_token:
+                        order_delta = order_size if order_side == "BUY" else -order_size
+                    elif order_token == no_token:
+                        order_delta = -order_size if order_side == "BUY" else order_size
+                    else:
+                        order_delta = 0
+
+                    # Only track if order increases position in current direction
+                    # (same logic as pending_yes in _send_order_locked)
+                    if (filled_yes >= 0 and order_delta > 0) or (filled_yes <= 0 and order_delta < 0):
+                        if not hasattr(global_state, "cancel_pending_delta"):
+                            global_state.cancel_pending_delta = {}
+                        global_state.cancel_pending_delta[order_id_to_track] = (market_id, order_delta)
+
             wo[side_key] = None
             # CRITICAL: Skip this quote cycle after canceling to prevent race condition
             # If we place new order immediately, both orders could be live for 50-200ms

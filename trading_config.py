@@ -31,3 +31,8 @@ AGGRESSIVE_ZSKEW_THRESHOLD = 0.06      # Minimum |z_skew_residual| (edge remaini
 AGGRESSIVE_MAX_TOTAL_ADJUSTMENT = 0.0575  # 5.75¢ cap when aggressive (crosses spread by 1+ tick)
 AGGRESSIVE_MAX_Z_SCORE_SKEW = 0.0575      # Allow 5.75¢ z_skew in aggressive mode (vs 3.5¢ normal)
 AGGRESSIVE_SIZE = 100                   # Fixed order size in aggressive mode (vs BASE_SIZE=20 normal)
+
+# Cancel-pending tracking: prevents position overshoot when order fills before cancel confirmation
+# When True: only track aggressive orders (large orders, bigger impact if they fill unexpectedly)
+# When False: track ALL orders through cancel path (safer but slightly more overhead)
+TRACK_CANCEL_PENDING_AGGRESSIVE_ONLY = True
