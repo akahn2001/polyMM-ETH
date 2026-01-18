@@ -1294,8 +1294,8 @@ async def _perform_trade_locked(market_id: str):
         if VERBOSE:
             print(f"[MM] manage_side {side_key}: desired_price={desired_price}, max_size={max_size}, edge={edge:.4f}, existing={existing}")
 
-        # Don't quote if we don't have minimum edge
-        if edge < MIN_EDGE_TO_QUOTE:
+        # Don't quote if we don't have minimum edge (bypass in aggressive mode - we're crossing spread intentionally)
+        if not aggressive_mode and edge < MIN_EDGE_TO_QUOTE:
             if existing is not None:
                 if VERBOSE:
                     print(f"[MM] manage_side {side_key}: cancel (no edge: {edge:.4f} < {MIN_EDGE_TO_QUOTE}) id={existing['id']}")
