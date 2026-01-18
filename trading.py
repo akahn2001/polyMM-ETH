@@ -441,9 +441,16 @@ async def _send_order_locked(token_id: str, side: str, price: float, size: float
 
         # Include cancel_pending_delta (tracks orders pending cancel that might have filled)
         # Delta is added when order is cancelled, removed when terminal status confirmed
+        # Clean up stale entries older than 10 seconds (safety net for missed events)
+        cancel_pending = getattr(global_state, "cancel_pending_delta", {})
+        now = time.time()
+        stale_ids = [oid for oid, entry in cancel_pending.items() if len(entry) >= 3 and now - entry[2] > 10]
+        for oid in stale_ids:
+            cancel_pending.pop(oid, None)
+
         cancel_delta = sum(
-            delta for oid, (mid, delta) in getattr(global_state, "cancel_pending_delta", {}).items()
-            if mid == market_id
+            entry[1] for oid, entry in cancel_pending.items()
+            if entry[0] == market_id
         )
 
         effective_yes = filled_yes + pending_yes + pending_delta + cancel_delta
@@ -1364,7 +1371,8 @@ async def _perform_trade_locked(market_id: str):
                     if (filled_yes >= 0 and order_delta > 0) or (filled_yes <= 0 and order_delta < 0):
                         if not hasattr(global_state, "cancel_pending_delta"):
                             global_state.cancel_pending_delta = {}
-                        global_state.cancel_pending_delta[order_id_to_track] = (market_id, order_delta)
+                        # Store (market_id, delta, timestamp) for timeout cleanup
+                        global_state.cancel_pending_delta[order_id_to_track] = (market_id, order_delta, time.time())
 
             wo[side_key] = None
             # CRITICAL: Skip this quote cycle after canceling to prevent race condition
