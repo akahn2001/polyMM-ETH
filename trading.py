@@ -1329,11 +1329,18 @@ async def _perform_trade_locked(market_id: str):
         size = min(base_size, max_size)
 
         if existing is not None:
-            # Check 1: Same rounded price → keep
+            # Check 1: Same rounded price → keep (unless aggressive mode needs size upgrade)
             if abs(existing["price"] - desired_price) < PRICE_MOVE_TOL:
-                if VERBOSE:
-                    print(f"[MM] manage_side {side_key}: existing price close enough, doing nothing")
-                return
+                existing_size = existing.get("size", 0)
+                # In aggressive mode, upgrade if existing order is smaller
+                if aggressive_mode and existing_size < size:
+                    if VERBOSE:
+                        print(f"[MM] manage_side {side_key}: upgrading to aggressive size {existing_size} -> {size}")
+                    # Fall through to cancel logic
+                else:
+                    if VERBOSE:
+                        print(f"[MM] manage_side {side_key}: existing price close enough, doing nothing")
+                    return
             # Check 2: Different rounded price, but raw near tick boundary → keep (avoids oscillation churn)
             if abs(raw_price - existing["price"]) < TICK_BOUNDARY_TOL:
                 if VERBOSE:
@@ -1375,10 +1382,11 @@ async def _perform_trade_locked(market_id: str):
                         global_state.cancel_pending_delta[order_id_to_track] = (market_id, order_delta, time.time())
 
             wo[side_key] = None
-            # CRITICAL: Skip this quote cycle after canceling to prevent race condition
-            # If we place new order immediately, both orders could be live for 50-200ms
-            # Next perform_trade() will place the new order with correct price
-            return
+            # In aggressive mode: place order immediately (don't waste the signal)
+            # cancel_pending_delta protects against race condition if cancelled order fills
+            # In normal mode: skip cycle to avoid both orders being live simultaneously
+            if not aggressive_mode:
+                return
         if VERBOSE:
             print(f"[MM] manage_side {side_key}: sending GTC {side_str} size={size} px={desired_price} token={token_id}")
 
