@@ -222,6 +222,15 @@ def process_user_data(rows):
                 # Clean up cancel_pending_delta (tracks orders that were cancelled but might have filled)
                 if order_id and hasattr(global_state, "cancel_pending_delta"):
                     global_state.cancel_pending_delta.pop(order_id, None)
+
+                # Clear wo["bid"]/wo["ask"] if this order matches
+                # This prevents double-counting when order fills before we try to cancel
+                if order_id and hasattr(global_state, "working_orders_by_market"):
+                    wo = global_state.working_orders_by_market.get(market, {})
+                    for side_key in ("bid", "ask"):
+                        entry = wo.get(side_key)
+                        if isinstance(entry, dict) and entry.get("id") == order_id:
+                            wo[side_key] = None
             else:
                 orders_for_market[order_id] = {
                     "order_id": order_id,
