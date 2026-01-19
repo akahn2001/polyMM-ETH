@@ -336,7 +336,7 @@ BINANCE_MOMENTUM_LOOKBACK = 0.5  # Seconds to look back for momentum calculation
 # MAX_MOMENTUM_ADJUSTMENT imported from trading_config
 
 # Dynamic spread based on option price sensitivity
-OPTION_MOVE_LOOKBACK = 1.0        # Seconds to look back for BTC move
+OPTION_MOVE_LOOKBACK = 1.0        # Seconds to look back for ETH move
 OPTION_MOVE_THRESHOLD = 0.02      # 2 cents - start widening when option moved this much (was 0.02)
 OPTION_MOVE_SPREAD_SCALE = 0.25    # spread multiplier per cent above threshold (was 0.5)
 MAX_OPTION_SPREAD_MULT = 1.0      # was 2.0, decreasing to 1.0 to turn this feature off!
@@ -785,7 +785,7 @@ def update_position_yes_space(market_id: str, outcome_token: str, side: str, siz
 
 async def perform_trade(market_id: str):
     """
-    MM logic for BTC 15m up/down market where:
+    MM logic for ETH 15m up/down market where:
       - Decisions & edges are in YES-space
       - Cheap YES -> BUY YES
       - Rich YES  -> BUY NO (instead of SELL YES)

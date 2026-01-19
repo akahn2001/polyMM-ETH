@@ -67,7 +67,7 @@ _last_coinbase_mid_usd = None
 
 def _update_coinbase_theos(coinbase_mid_usd: float):
     """
-    Internal callback to update Coinbase-based fair values for all BTC markets.
+    Internal callback to update Coinbase-based fair values for all ETH markets.
 
     Called on each Coinbase price tick. Updates theo for each market and triggers trading.
     Coinbase is native USD, so no conversion needed.
@@ -146,11 +146,11 @@ def _update_coinbase_theos(coinbase_mid_usd: float):
     # Calculate Coinbase-RTDS spread z-score (predictive signal for RTDS mode)
     _update_coinbase_rtds_zscore(coinbase_mid_usd)
 
-    # Update fair value for all BTC markets and trigger trading
+    # Update fair value for all ETH markets and trigger trading
     # Only trigger if Coinbase is the primary price source
     price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
-    if price_source == "COINBASE" and hasattr(global_state, 'btc_markets'):
-        for market_id in global_state.btc_markets:
+    if price_source == "COINBASE" and hasattr(global_state, 'eth_markets'):
+        for market_id in global_state.eth_markets:
             try:
                 # Update main theo (uses Coinbase price)
                 if update_fair_value_for_market is not None:
@@ -169,14 +169,14 @@ def _update_coinbase_theos(coinbase_mid_usd: float):
                 pass
 
 
-async def stream_coinbase_btcusd_mid(on_mid=None, *, verbose=False):
+async def stream_coinbase_ethusd_mid(on_mid=None, *, verbose=False):
     """
-    Streams Coinbase BTC-USD best bid/ask (ticker channel) and computes mid = (bid+ask)/2.
+    Streams Coinbase ETH-USD best bid/ask (ticker channel) and computes mid = (bid+ask)/2.
 
     on_mid: optional callback(mid: float, bid: float, ask: float, ts: float)
     If global_state exists, will also update global_state.coinbase_mid_price and global_state.coinbase_mid_ts.
 
-    Also automatically updates Coinbase-based fair values for all BTC markets.
+    Also automatically updates Coinbase-based fair values for all ETH markets.
     """
     backoff = 1.0
 
@@ -196,10 +196,10 @@ async def stream_coinbase_btcusd_mid(on_mid=None, *, verbose=False):
                 if verbose:
                     print("[COINBASE] connected")
 
-                # Subscribe to BTC-USD ticker channel
+                # Subscribe to ETH-USD ticker channel
                 subscribe_msg = {
                     "type": "subscribe",
-                    "product_ids": ["BTC-USD"],
+                    "product_ids": ["ETH-USD"],
                     "channels": ["ticker"]
                 }
                 await ws.send(orjson.dumps(subscribe_msg).decode('utf-8'))
@@ -253,4 +253,4 @@ async def stream_coinbase_btcusd_mid(on_mid=None, *, verbose=False):
 
 # Example run
 if __name__ == "__main__":
-    asyncio.run(stream_coinbase_btcusd_mid(verbose=True))
+    asyncio.run(stream_coinbase_ethusd_mid(verbose=True))

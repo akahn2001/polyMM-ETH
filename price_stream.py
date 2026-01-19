@@ -53,7 +53,7 @@ def _update_coinbase_bias_correction(rtds_price: float):
 
 RTDS_URL = "wss://ws-live-data.polymarket.com"
 
-# Build the subscription payload for BTC/USD from Chainlink
+# Build the subscription payload for ETH/USD from Chainlink
 SUBSCRIBE_MSG = {
     "action": "subscribe",
     "subscriptions": [
@@ -61,7 +61,7 @@ SUBSCRIBE_MSG = {
             "topic": "crypto_prices_chainlink",
             "type": "*",  # all message types for this topic
             # NOTE: filters must be a JSON-encoded string per docs
-            "filters": "{\"symbol\":\"btc/usd\"}"
+            "filters": "{\"symbol\":\"eth/usd\"}"
         }
     ],
 }
@@ -81,7 +81,7 @@ async def ping_loop(ws, interval_sec: int = 5):
         await asyncio.sleep(interval_sec)
 
 
-async def stream_btc_usd():
+async def stream_eth_usd():
     print(f"[RTDS] Connecting to {RTDS_URL}...")
     while True:  # Reconnection loop
         try:
@@ -91,9 +91,9 @@ async def stream_btc_usd():
                 _set_tcp_nodelay(ws)
 
                 print("[RTDS] Websocket connected, sending subscription...")
-                # Subscribe to BTC/USD Chainlink crypto price stream
+                # Subscribe to ETH/USD Chainlink crypto price stream
                 await ws.send(orjson.dumps(SUBSCRIBE_MSG).decode('utf-8'))
-                print("[RTDS] Connected and subscribed to crypto_prices_chainlink for btc/usd")
+                print("[RTDS] Connected and subscribed to crypto_prices_chainlink for eth/usd")
 
                 # Start background ping task
                 asyncio.create_task(ping_loop(ws))
@@ -137,7 +137,7 @@ async def stream_btc_usd():
                                 global_state.price_blend_filter.update_rtds(mid_price)
                                 global_state.blended_price = global_state.price_blend_filter.get_blended_price()
 
-                            for market_id in global_state.btc_markets:
+                            for market_id in global_state.eth_markets:
                                 update_fair_value_for_market(market_id)
                                 asyncio.create_task(perform_trade(market_id))
 
@@ -167,7 +167,7 @@ async def stream_btc_usd():
                                 global_state.price_blend_filter.update_rtds(mid_price)
                                 global_state.blended_price = global_state.price_blend_filter.get_blended_price()
 
-                            for market_id in global_state.btc_markets:
+                            for market_id in global_state.eth_markets:
                                 update_fair_value_for_market(market_id)
                                 asyncio.create_task(perform_trade(market_id))
                     except (orjson.JSONDecodeError, ValueError):
@@ -185,4 +185,4 @@ async def stream_btc_usd():
 
 
 if __name__ == "__main__":
-    asyncio.run(stream_btc_usd())
+    asyncio.run(stream_eth_usd())

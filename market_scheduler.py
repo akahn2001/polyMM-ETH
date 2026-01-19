@@ -1,5 +1,5 @@
 """
-Market Scheduler for 15-minute BTC Up/Down Markets
+Market Scheduler for 15-minute ETH Up/Down Markets
 
 Automatically discovers, schedules, and transitions between markets.
 Captures strike from RTDS at market start time.
@@ -20,7 +20,7 @@ ET = ZoneInfo("America/New_York")
 def parse_market_time(question: str) -> tuple[datetime, datetime] | None:
     """
     Parse start and end times from market name.
-    Example: "Bitcoin Up or Down - December 25, 2:45PM-3:00PM ET"
+    Example: "Ethereum Up or Down - December 25, 2:45PM-3:00PM ET"
     Returns (start_dt, end_dt) in ET timezone, or None if parse fails.
     """
     # Pattern: "Month Day, StartTime-EndTime ET"
@@ -107,29 +107,29 @@ def parse_tokens(tokens_str: str) -> tuple[str, str] | None:
     return None
 
 
-def load_btc_15min_markets(csv_path: str) -> list[dict]:
+def load_eth_15min_markets(csv_path: str) -> list[dict]:
     """
-    Load all BTC 15-minute up/down markets from CSV.
+    Load all ETH 15-minute up/down markets from CSV.
     Returns list of market dicts sorted by start time.
     """
     print(f"[SCHEDULER] Reading CSV file...")
     df = pd.read_csv(csv_path)
     print(f"[SCHEDULER] CSV loaded, {len(df)} total rows")
 
-    # Filter to Bitcoin up/down markets (have time pattern in name)
-    print(f"[SCHEDULER] Filtering to BTC up/down markets...")
-    btc_markets = df[
-        df['question'].str.contains('Bitcoin Up or Down', na=False) &
+    # Filter to Ethereum up/down markets (have time pattern in name)
+    print(f"[SCHEDULER] Filtering to ETH up/down markets...")
+    eth_markets = df[
+        df['question'].str.contains('Ethereum Up or Down', na=False) &
         df['question'].str.contains(r'\d+:\d+[AP]M-\d+:\d+[AP]M', na=False, regex=True)
     ].copy()
-    print(f"[SCHEDULER] Found {len(btc_markets)} BTC markets with time patterns")
+    print(f"[SCHEDULER] Found {len(eth_markets)} ETH markets with time patterns")
 
     markets = []
-    print(f"[SCHEDULER] Parsing {len(btc_markets)} markets...")
+    print(f"[SCHEDULER] Parsing {len(eth_markets)} markets...")
 
-    for idx, (_, row) in enumerate(btc_markets.iterrows()):
+    for idx, (_, row) in enumerate(eth_markets.iterrows()):
         if idx % 1000 == 0:
-            print(f"[SCHEDULER] Parsed {idx}/{len(btc_markets)} markets...")
+            print(f"[SCHEDULER] Parsed {idx}/{len(eth_markets)} markets...")
 
         question = row['question']
         times = parse_market_time(question)
@@ -258,8 +258,8 @@ def configure_market(market: dict, strike: float):
 
     # Update all_tokens to point to current market's YES token
     global_state.all_tokens = [yes_token]
-    # btc_markets should contain condition_ids (not token_ids) for fair value updates
-    global_state.btc_markets = {condition_id}
+    # eth_markets should contain condition_ids (not token_ids) for fair value updates
+    global_state.eth_markets = {condition_id}
 
     # Initialize position tracking
     if condition_id not in global_state.positions_by_market:
@@ -342,12 +342,12 @@ async def run_scheduler(csv_path: str, stop_before_end_seconds: int = 60, preloa
     else:
         print(f"[SCHEDULER] Loading markets from {csv_path}")
         try:
-            markets = load_btc_15min_markets(csv_path)
+            markets = load_eth_15min_markets(csv_path)
         except Exception as e:
             print(f"[SCHEDULER] ERROR loading markets: {e}")
             traceback.print_exc()
             return
-        print(f"[SCHEDULER] Found {len(markets)} BTC 15-min markets")
+        print(f"[SCHEDULER] Found {len(markets)} ETH 15-min markets")
 
     if not markets:
         print(f"[SCHEDULER] ERROR: No markets found! Check CSV file and parsing.")
@@ -377,7 +377,7 @@ async def run_scheduler(csv_path: str, stop_before_end_seconds: int = 60, preloa
             print(f"[SCHEDULER] get_next_market returned None")
             print(f"[SCHEDULER] No more markets today. Reloading CSV in 1 hour...")
             await asyncio.sleep(3600)
-            markets = load_btc_15min_markets(csv_path)
+            markets = load_eth_15min_markets(csv_path)
 
             # Update subscription tokens with any new markets
             old_tokens = set(global_state.all_subscription_tokens)
@@ -478,9 +478,9 @@ if __name__ == "__main__":
         sys.exit(1)
 
     csv_path = sys.argv[1]
-    markets = load_btc_15min_markets(csv_path)
+    markets = load_eth_15min_markets(csv_path)
 
-    print(f"Found {len(markets)} BTC 15-min markets\n")
+    print(f"Found {len(markets)} ETH 15-min markets\n")
 
     now = datetime.now(ET)
     upcoming = [m for m in markets if m['end_time'] > now]

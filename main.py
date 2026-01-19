@@ -20,9 +20,9 @@ import global_state
 from global_state import all_data, client, token_to_condition_id, condition_to_token_id, REVERSE_TOKENS, net_position
 from polymarket_client import PolymarketClient
 from websocket_handlers import connect_market_websocket, connect_user_websocket
-from price_stream import stream_btc_usd
-from binance_price_stream import get_usdt_usd_rate, get_binance_btcusdt_mid, stream_binance_btcusdt_mid
-from coinbase_price_stream import stream_coinbase_btcusd_mid
+from price_stream import stream_eth_usd
+from binance_price_stream import get_usdt_usd_rate, get_binance_ethusdt_mid, stream_binance_ethusdt_mid
+from coinbase_price_stream import stream_coinbase_ethusd_mid
 from util import get_best_bid_offer
 from rust_math import bs_binary_call, bs_binary_call_implied_vol_closed
 from datetime import datetime
@@ -31,7 +31,7 @@ from kalman_filter import VolKalman1D
 from price_blend_kalman import PriceBlendKalman
 from trading import sweep_zombie_orders_from_working, reconcile_loop, reconcile_loop_all
 from markouts import markout_loop, markout_dump_loop
-from market_scheduler import load_btc_15min_markets, run_scheduler
+from market_scheduler import load_eth_15min_markets, run_scheduler
 
 async def health_monitor():
     """Log health metrics every 30 seconds to diagnose performance decay."""
@@ -370,11 +370,11 @@ async def main():
     client = PolymarketClient()
     global_state.client = client
 
-    # Load all BTC 15-min markets from CSV
+    # Load all ETH 15-min markets from CSV
     # Run `python fetch_markets.py` to generate this file
     csv_path = "all_markets.csv"
-    all_markets = load_btc_15min_markets(csv_path)
-    print(f"[MAIN] Loaded {len(all_markets)} BTC 15-min markets from {csv_path}")
+    all_markets = load_eth_15min_markets(csv_path)
+    print(f"[MAIN] Loaded {len(all_markets)} ETH 15-min markets from {csv_path}")
 
     # Extract all token IDs for websocket subscription (subscribe to all upcoming markets)
     all_token_ids = []
@@ -390,10 +390,10 @@ async def main():
     # Initialize with first market's token (scheduler will update this)
     if all_markets:
         global_state.all_tokens = [all_markets[0]['yes_token']]
-        # btc_markets should contain condition_ids (not token_ids) for fair value updates
-        global_state.btc_markets.add(all_markets[0]['condition_id'])
+        # eth_markets should contain condition_ids (not token_ids) for fair value updates
+        global_state.eth_markets.add(all_markets[0]['condition_id'])
     else:
-        print("[MAIN] WARNING: No BTC 15-min markets found!")
+        print("[MAIN] WARNING: No ETH 15-min markets found!")
         global_state.all_tokens = []
 
     # Store all token IDs for websocket subscription
@@ -402,26 +402,26 @@ async def main():
 
     # Initialize price blend Kalman filter with current market price
     print("[INIT] Querying Binance and Kraken APIs for initial price...")
-    btcusdt = get_binance_btcusdt_mid(verbose=True)
+    ethusdt = get_binance_ethusdt_mid(verbose=True)
     usdtusd = get_usdt_usd_rate(verbose=True)
 
-    if btcusdt is not None and usdtusd is not None:
-        initial_btcusd = btcusdt * usdtusd
-        print(f"[INIT] Initial BTCUSD price (from Binance): {initial_btcusd:.2f}")
+    if ethusdt is not None and usdtusd is not None:
+        initial_ethusd = ethusdt * usdtusd
+        print(f"[INIT] Initial ETHUSD price (from Binance): {initial_ethusd:.2f}")
     else:
-        initial_btcusd = 88000.0  # Fallback
-        print(f"[INIT] Failed to query APIs, using fallback price: {initial_btcusd:.2f}")
+        initial_ethusd = 3300.0  # Fallback for ETH
+        print(f"[INIT] Failed to query APIs, using fallback price: {initial_ethusd:.2f}")
 
     global_state.usdtusd = usdtusd if usdtusd is not None else 0.999425
-    global_state.binance_mid_price = btcusdt  # Initialize with API query result
+    global_state.binance_mid_price = ethusdt  # Initialize with API query result
 
     # Correct initial estimate for known Binance bias
-    # If Binance is $7 lower, and we got price from Binance, add $7 to get true estimate
-    initial_btcusd_corrected = initial_btcusd - (-8.0)  # Subtract the bias
-    print(f"[INIT] Bias-corrected initial price: {initial_btcusd_corrected:.2f}")
+    # ETH has different bias characteristics - start with smaller assumption
+    initial_ethusd_corrected = initial_ethusd - (-1.0)  # Smaller bias for ETH
+    print(f"[INIT] Bias-corrected initial price: {initial_ethusd_corrected:.2f}")
 
     global_state.price_blend_filter = PriceBlendKalman(
-        x0=initial_btcusd_corrected,
+        x0=initial_ethusd_corrected,
         P0=100.0**2,
         process_var_per_sec=10.0**2,
         rtds_meas_var=2.0**2,
@@ -429,8 +429,8 @@ async def main():
         bias_learning_rate=0.06,  # Faster bias adaptation (was 0.01)
         pause_bias_learning_during_movement=True
     )
-    global_state.blended_price = initial_btcusd_corrected
-    print(f"[INIT] Price blend Kalman filter initialized with x0={initial_btcusd_corrected:.2f}")
+    global_state.blended_price = initial_ethusd_corrected
+    print(f"[INIT] Price blend Kalman filter initialized with x0={initial_ethusd_corrected:.2f}")
 
     #print("After initial updates: ", global_state.orders, global_state.positions)
 
@@ -459,17 +459,17 @@ async def main():
             price_source = getattr(global_state, 'PRICE_SOURCE', 'RTDS')
             if price_source == "COINBASE":
                 # Coinbase mode: RTDS + Coinbase trigger trades
-                exchange_stream = stream_coinbase_btcusd_mid(verbose=False)
+                exchange_stream = stream_coinbase_ethusd_mid(verbose=False)
             elif price_source == "RTDS":
                 # RTDS mode: RTDS triggers trades, Coinbase used for z-score predictor
-                exchange_stream = stream_coinbase_btcusd_mid(verbose=False)
+                exchange_stream = stream_coinbase_ethusd_mid(verbose=False)
             else:  # BLEND
                 # Blend mode: RTDS + Binance trigger trades
-                exchange_stream = stream_binance_btcusdt_mid(verbose=False)
+                exchange_stream = stream_binance_ethusdt_mid(verbose=False)
 
             await asyncio.gather(
                 connect_market_websocket(global_state.all_subscription_tokens),  # Subscribe to all markets
-                stream_btc_usd(),
+                stream_eth_usd(),
                 exchange_stream,  # Only one exchange stream needed based on mode
                 connect_user_websocket(client.creds.api_key, client.creds.api_secret, client.creds.api_passphrase),
                 reconcile_loop_all(),

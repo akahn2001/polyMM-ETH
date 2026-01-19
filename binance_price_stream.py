@@ -24,22 +24,22 @@ from util import update_binance_fair_value_for_market, update_fair_value_for_mar
 from rust_math import bs_binary_call
 from trading import perform_trade, MIN_ORDER_INTERVAL, cancel_order_async, EARLY_CANCEL_OPTION_MOVE
 
-BINANCE_WS = "wss://stream.binance.com:9443/ws/btcusdt@bookTicker"
+BINANCE_WS = "wss://stream.binance.com:9443/ws/ethusdt@bookTicker"
 BINANCE_TICKER_API = "https://api.binance.com/api/v3/ticker/bookTicker"
 KRAKEN_API = "https://api.kraken.com/0/public/Ticker"
 
 
-def get_binance_btcusdt_mid(verbose=False):
+def get_binance_ethusdt_mid(verbose=False):
     """
-    Query Binance REST API once to get current BTCUSDT mid price.
+    Query Binance REST API once to get current ETHUSDT mid price.
 
     Returns:
-        float: BTCUSDT mid price, or None if query fails
+        float: ETHUSDT mid price, or None if query fails
     """
     try:
         response = requests.get(
             BINANCE_TICKER_API,
-            params={'symbol': 'BTCUSDT'},
+            params={'symbol': 'ETHUSDT'},
             timeout=5
         )
         response.raise_for_status()
@@ -50,7 +50,7 @@ def get_binance_btcusdt_mid(verbose=False):
         mid = (bid + ask) / 2.0
 
         if verbose:
-            print(f"[Binance API] BTCUSDT: bid={bid:.2f}, ask={ask:.2f}, mid={mid:.2f}")
+            print(f"[Binance API] ETHUSDT: bid={bid:.2f}, ask={ask:.2f}, mid={mid:.2f}")
 
         return mid
 
@@ -128,9 +128,9 @@ _last_binance_mid_usd = None
 
 def _update_binance_theos(binance_mid_usdt: float):
     """
-    Internal callback to update Binance-based fair values for all BTC markets.
+    Internal callback to update Binance-based fair values for all ETH markets.
 
-    Called on each Binance price tick. Adjusts BTCUSDT to BTCUSD using the
+    Called on each Binance price tick. Adjusts ETHUSDT to ETHUSD using the
     global USDT/USD exchange rate, then calculates theo for each market.
     """
     global _last_binance_mid_usd
@@ -141,7 +141,7 @@ def _update_binance_theos(binance_mid_usdt: float):
     # Get USDT/USD conversion rate
     usdtusd = getattr(global_state, 'usdtusd', 1.0)
 
-    # Convert BTCUSDT -> BTCUSD
+    # Convert ETHUSDT -> ETHUSD
     binance_mid_usd = binance_mid_usdt * usdtusd
 
     # Store price history for momentum calculation (deque auto-evicts old entries)
@@ -215,9 +215,9 @@ def _update_binance_theos(binance_mid_usdt: float):
         global_state.price_blend_filter.update_binance(binance_mid_usd)
         global_state.blended_price = global_state.price_blend_filter.get_blended_price()
 
-    # Update fair value for all BTC markets using Binance price
-    if hasattr(global_state, 'btc_markets'):
-        for market_id in global_state.btc_markets:
+    # Update fair value for all ETH markets using Binance price
+    if hasattr(global_state, 'eth_markets'):
+        for market_id in global_state.eth_markets:
             try:
                 # Update Binance-specific theo (for monitoring only)
                 update_binance_fair_value_for_market(market_id, binance_mid_usd)
@@ -243,14 +243,14 @@ def _update_binance_theos(binance_mid_usdt: float):
                 pass
 
 
-async def stream_binance_btcusdt_mid(on_mid=None, *, verbose=False):
+async def stream_binance_ethusdt_mid(on_mid=None, *, verbose=False):
     """
-    Streams Binance BTCUSDT best bid/ask (bookTicker) and computes mid = (bid+ask)/2.
+    Streams Binance ETHUSDT best bid/ask (bookTicker) and computes mid = (bid+ask)/2.
 
     on_mid: optional callback(mid: float, bid: float, ask: float, ts: float)
     If global_state exists, will also update global_state.mid_price and global_state.mid_ts.
 
-    Also automatically updates Binance-based fair values for all BTC markets.
+    Also automatically updates Binance-based fair values for all ETH markets.
     """
     backoff = 1.0
 
@@ -312,5 +312,5 @@ if __name__ == "__main__":
     rate = get_usdt_usd_rate(verbose=True)
     print(f"\nReturned rate: {rate}\n")
 
-    # Stream BTC prices
-    asyncio.run(stream_binance_btcusdt_mid(verbose=True))
+    # Stream ETH prices
+    asyncio.run(stream_binance_ethusdt_mid(verbose=True))

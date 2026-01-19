@@ -148,7 +148,7 @@ token_to_condition_id = {}
 open_orders = {}
 
 net_position = 0
-strike = 88088.64
+strike = 3300.00  # ETH strike price - will be updated by scheduler
 exp = datetime(2025, 12, 25, 15, 0, tzinfo=ZoneInfo("America/New_York"))
 
 client = None
@@ -158,13 +158,13 @@ mid_price = None
 rtds_last_update_time = None  # Track when RTDS last updated (for staleness detection)
 user_ws_last_event_time = None  # Track when user websocket last sent ORDER/TRADE event (for position staleness detection)
 
-# Binance price stream data (BTCUSDT)
+# Binance price stream data (ETHUSDT)
 binance_mid_price = None
 binance_mid_ts = None
 binance_mid_bid = None
 binance_mid_ask = None
 
-# Coinbase price stream data (BTC/USD, native USD)
+# Coinbase price stream data (ETH/USD, native USD)
 coinbase_mid_price = None
 coinbase_mid_ts = None
 coinbase_mid_bid = None
@@ -198,7 +198,7 @@ binary_delta = {}
 binance_fair_value = {}
 binance_binary_delta = {}
 
-btc_markets = set()
+eth_markets = set()
 
 markouts = deque(maxlen=2000)  # Bound memory - ~16 hours of fills
 

@@ -34,16 +34,16 @@ def main():
     df.to_csv(backup_file, index=False)
     print(f"[FETCH] Backup saved to {backup_file}")
 
-    # Show some stats about BTC markets
-    btc_markets = df[
-        df['question'].str.contains('Bitcoin Up or Down', na=False) &
+    # Show some stats about ETH markets
+    eth_markets = df[
+        df['question'].str.contains('Ethereum Up or Down', na=False) &
         df['question'].str.contains(r'\d+:\d+[AP]M-\d+:\d+[AP]M', na=False, regex=True)
     ]
-    print(f"[FETCH] Found {len(btc_markets)} BTC Up/Down markets with time patterns")
+    print(f"[FETCH] Found {len(eth_markets)} ETH Up/Down markets with time patterns")
 
     # Show upcoming markets (accepting orders)
     if 'accepting_orders' in df.columns:
-        accepting = btc_markets[btc_markets['accepting_orders'].astype(str).str.upper() == 'TRUE']
+        accepting = eth_markets[eth_markets['accepting_orders'].astype(str).str.upper() == 'TRUE']
         print(f"[FETCH] {len(accepting)} are currently accepting orders")
 
 
